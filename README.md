@@ -29,6 +29,8 @@ pip install -r requirements.txt
 
 Edit DB credentials in `backend/app.py` (or set env vars `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`).
 
+Make sure your local MySQL server is running and accepting connections on `127.0.0.1:3306` before starting the backend.
+
 ```bash
 python app.py
 ```

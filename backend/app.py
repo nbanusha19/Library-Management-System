@@ -1,29 +1,50 @@
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from backend/.env when present
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 from datetime import date, timedelta
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import mysql.connector
 from mysql.connector import pooling
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-CORS(app)
+# Use a permissive CORS during development to avoid preflight issues from the frontend dev server
+CORS(app, supports_credentials=True)
+
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers.setdefault("Access-Control-Allow-Origin", "*")
+    response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, X-Auth-Role, X-Auth-User-Id")
+    response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+    return response
 
 DB_CONFIG = {
-    "host": "127.0.0.1",
-    "user": "root",
-    "password": "Anushanb@19",
-    "database": "library_db"
+    "host": os.getenv("DB_HOST", "127.0.0.1"),
+    "user": os.getenv("DB_USER", "root"),
+    "password": os.getenv("DB_PASSWORD") or "Anushanb@19",  # fallback default for dev
+    "database": os.getenv("DB_NAME", "library_db"),
 }
 
 LOAN_DAYS = 15
 SUBJECTS = ["Science", "Kannada", "English", "Mathematics",
             "Social Studies", "Sanskrit", "Hindi"]
 
-pool = pooling.MySQLConnectionPool(pool_name="lms_pool", pool_size=5, **DB_CONFIG)
+pool = None
+
+
+def init_db_pool():
+    global pool
+    if pool is None:
+        pool = pooling.MySQLConnectionPool(pool_name="lms_pool", pool_size=5, **DB_CONFIG)
+    return pool
 
 
 def get_conn():
-    return pool.get_connection()
+    return init_db_pool().get_connection()
 
 
 def rows(cursor):
@@ -34,7 +55,7 @@ def rows(cursor):
 def get_auth():
     role = (request.headers.get("X-Auth-Role") or "").lower()
     user_id = request.headers.get("X-Auth-User-Id")
-    if role not in ("user", "admin") or not user_id:
+    if role not in ("user", "admin", "staff") or not user_id:
         return None
     try:
         user_id = int(user_id)
@@ -60,7 +81,7 @@ def find_user_by_id(user_id):
 
 def find_admin_by_id(admin_id):
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT id, username, email FROM admins WHERE id=%s", (admin_id,))
+    cur.execute("SELECT id, username, email FROM users WHERE id=%s AND role='admin'", (admin_id,))
     row = cur.fetchone()
     cur.close(); conn.close()
     if not row:
@@ -71,7 +92,7 @@ def find_admin_by_id(admin_id):
 def get_user_by_username(username):
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
-        "SELECT id, username, email, phone, password, status FROM users WHERE username=%s", (username,)
+        "SELECT id, username, email, phone, password, status, role, profile_photo FROM users WHERE username=%s", (username,)
     )
     row = cur.fetchone()
     cur.close(); conn.close()
@@ -79,14 +100,14 @@ def get_user_by_username(username):
         return None
     return {
         "id": row[0], "username": row[1], "email": row[2],
-        "phone": row[3], "password": row[4], "status": row[5]
+        "phone": row[3], "password": row[4], "status": row[5], "role": row[6], "profile_photo": row[7]
     }
 
 
 def get_admin_by_username(username):
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
-        "SELECT id, username, email, password FROM admins WHERE username=%s", (username,)
+        "SELECT id, username, email, password FROM users WHERE username=%s AND role='admin'", (username,)
     )
     row = cur.fetchone()
     cur.close(); conn.close()
@@ -132,10 +153,10 @@ def register():
         )
         if cur.fetchone():
             return jsonify({"error": "Username, email, or phone already registered"}), 400
-
+        hashed = generate_password_hash(password)
         cur.execute(
-            "INSERT INTO users (username, email, phone, password, status) VALUES (%s, %s, %s, %s, 'pending')",
-            (username, email, phone, password),
+            "INSERT INTO users (username, email, phone, password, status, role) VALUES (%s, %s, %s, %s, 'pending', 'user')",
+            (username, email, phone, hashed),
         )
         user_id = cur.lastrowid
         cur.execute(
@@ -158,13 +179,8 @@ def login():
     password = (payload.get("password") or "").strip()
     if not username or not password:
         return jsonify({"error": "username and password are required"}), 400
-
-    admin = get_admin_by_username(username)
-    if admin and admin["password"] == password:
-        return jsonify({"user": {"id": admin["id"], "username": admin["username"], "email": admin["email"], "role": "admin"}})
-
     user = get_user_by_username(username)
-    if not user or user["password"] != password:
+    if not user or not check_password_hash(user["password"], password):
         return jsonify({"error": "Invalid login credentials"}), 401
 
     if user["status"] == "pending":
@@ -179,7 +195,8 @@ def login():
             "email": user["email"],
             "phone": user["phone"],
             "status": user["status"],
-            "role": "user"
+            "role": user.get("role", "user"),
+            "profile_photo": user.get("profile_photo")
         }
     })
 
@@ -202,6 +219,50 @@ def auth_me():
     return jsonify(user)
 
 
+@app.route("/api/auth/debug", methods=["GET"])
+def auth_debug():
+    """Debug endpoint - shows auth headers and auth object"""
+    auth = get_auth()
+    headers = {
+        "X-Auth-Role": request.headers.get("X-Auth-Role"),
+        "X-Auth-User-Id": request.headers.get("X-Auth-User-Id"),
+    }
+    return jsonify({
+        "headers": headers,
+        "auth": auth,
+        "auth_computed_from_headers": get_auth() is not None
+    })
+
+
+@app.route("/api/admin/init-db", methods=["POST"])
+def init_db():
+    """Initialize/reset database schema - admin only"""
+    auth = get_auth()
+    if not auth or auth["role"] != "admin":
+        return jsonify({"error": "Forbidden"}), 403
+    
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        
+        # Read and execute schema
+        with open("../database/schema.sql", "r") as f:
+            schema = f.read()
+        
+        # Split by semicolons and execute each statement
+        for statement in schema.split(";"):
+            statement = statement.strip()
+            if statement:
+                cur.execute(statement)
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"message": "Database initialized successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/users/pending", methods=["GET"])
 def pending_users():
     auth = get_auth()
@@ -215,6 +276,73 @@ def pending_users():
     data = rows(cur)
     cur.close(); conn.close()
     return jsonify(data)
+
+
+@app.route("/api/users", methods=["GET"])
+def list_users():
+    auth = get_auth()
+    if not auth or auth["role"] != "admin":
+        return jsonify({"error": "Forbidden"}), 403
+
+    status = (request.args.get("status") or "").strip().lower()
+    role = (request.args.get("role") or "").strip().lower()
+    q = (request.args.get("q") or "").strip()
+    sort_by = (request.args.get("sort_by") or "created_at").strip().lower()
+    sort_dir = (request.args.get("sort_dir") or "desc").strip().lower()
+    try:
+        page = max(int(request.args.get("page", 1)), 1)
+    except ValueError:
+        page = 1
+    try:
+        page_size = min(max(int(request.args.get("page_size", 10)), 1), 100)
+    except ValueError:
+        page_size = 10
+
+    sort_columns = {
+        "name": "username",
+        "date_joined": "created_at",
+        "created_at": "created_at",
+        "status": "status",
+        "role": "role",
+    }
+    sort_col = sort_columns.get(sort_by, "created_at")
+    sort_dir = "asc" if sort_dir == "asc" else "desc"
+
+    filters = []
+    params = []
+    if status in ("pending", "approved", "rejected"):
+        filters.append("status=%s")
+        params.append(status)
+    if role in ("admin", "staff", "user"):
+        filters.append("role=%s")
+        params.append(role)
+    if q:
+        filters.append("(username LIKE %s OR email LIKE %s OR phone LIKE %s)")
+        wildcard = f"%{q}%"
+        params.extend([wildcard, wildcard, wildcard])
+
+    where_sql = ""
+    if filters:
+        where_sql = "WHERE " + " AND ".join(filters)
+
+    offset = (page - 1) * page_size
+
+    conn = get_conn(); cur = conn.cursor()
+    count_sql = f"SELECT COUNT(*) FROM users {where_sql}"
+    cur.execute(count_sql, tuple(params))
+    total = cur.fetchone()[0]
+
+    query = f"SELECT id, username, email, phone, role, status, created_at FROM users {where_sql} ORDER BY {sort_col} {sort_dir} LIMIT %s OFFSET %s"
+    cur.execute(query, (*params, page_size, offset))
+    data = rows(cur)
+    cur.close(); conn.close()
+
+    return jsonify({
+        "data": data,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    })
 
 
 @app.route("/api/users/<int:user_id>/review", methods=["POST"])

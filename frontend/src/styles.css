@@ -40,6 +40,48 @@ button.danger {
   background: #dc2626; color: white; border: none;
   padding: .35rem .8rem; border-radius: 6px; cursor: pointer;
 }
+.tabs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.tabs-row button {
+  background: #e5e7eb;
+  color: #111827;
+  border: none;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.tabs-row button.active {
+  background: #4338ca;
+  color: white;
+}
+.tabs-row button:hover {
+  background: #c7d2fe;
+}
+.button-return {
+  background: #10b981;
+  color: white;
+  border: none;
+  padding: .3rem .65rem;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-top: .35rem;
+  font-size: .8rem;
+}
+.button-return:hover {
+  background: #059669;
+}
+.book-group-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .4rem 0;
+}
 .badge { padding: .15rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 600; }
 .badge.borrowed { background: #fef3c7; color: #92400e; }
 .badge.returned { background: #d1fae5; color: #065f46; }

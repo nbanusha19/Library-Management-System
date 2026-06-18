@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import { useToast, ToastContainer } from "./Toast";
 
 const USER_TABS = [
   { key: "books", label: "Browse Books" },
@@ -8,7 +9,7 @@ const USER_TABS = [
   { key: "status", label: "Approval History" },
 ];
 const ADMIN_TABS = [
-  { key: "pending", label: "Pending Users" },
+  { key: "users", label: "User Approvals" },
   { key: "records", label: "Borrow Records" },
 ];
 
@@ -17,6 +18,7 @@ export default function App() {
   const [tab, setTab] = useState("books");
   const [mode, setMode] = useState("login");
   const [message, setMessage] = useState("");
+  const { toasts, showToast, removeToast } = useToast();
 
   useEffect(() => {
     const stored = JSON.parse(localStorage.getItem("lms_auth") || "null");
@@ -53,6 +55,7 @@ export default function App() {
 
   return (
     <>
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
       <header>
         <div className="header-top">
           <h1>📚 Library Management System</h1>
@@ -86,7 +89,7 @@ export default function App() {
       <main>
         {user ? (
           user.role === "admin" ? (
-            tab === "pending" ? <PendingUsersView /> : <AdminRecordsView />
+            tab === "users" ? <UserApprovalsView /> : <AdminRecordsView />
           ) : (
             tab === "books" ? <BooksView />
               : tab === "active" ? <RecordsView mode="active" />
@@ -94,26 +97,34 @@ export default function App() {
               : <StatusHistoryView />
           )
         ) : (
-          mode === "login" ? <LoginView onLogin={handleLogin} message={message} /> : <RegisterView onRegister={handleRegisterSuccess} message={message} />
+          mode === "login" ? <LoginView onLogin={handleLogin} message={message} showToast={showToast} /> : <RegisterView onRegister={handleRegisterSuccess} message={message} showToast={showToast} />
         )}
       </main>
     </>
   );
 }
 
-function LoginView({ onLogin, message }) {
+function LoginView({ onLogin, message, showToast }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   const submit = async () => {
     setError("");
+    if (!username.trim() || !password.trim()) {
+      const msg = "Username and password are required";
+      setError(msg);
+      showToast(msg, "warning");
+      return;
+    }
     try {
       const res = await api.login(username.trim(), password.trim());
       const user = res.user;
+      showToast(`Welcome, ${user.username}!`, "success");
       onLogin(user);
     } catch (e) {
       setError(e.message);
+      showToast(e.message, "error");
     }
   };
 
@@ -135,7 +146,7 @@ function LoginView({ onLogin, message }) {
   );
 }
 
-function RegisterView({ onRegister, message }) {
+function RegisterView({ onRegister, message, showToast }) {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -146,12 +157,20 @@ function RegisterView({ onRegister, message }) {
   const submit = async () => {
     setError("");
     setSuccess("");
+    if (!username.trim() || !email.trim() || !phone.trim() || !password.trim()) {
+      const msg = "All fields are required";
+      setError(msg);
+      showToast(msg, "warning");
+      return;
+    }
     try {
       const res = await api.register(username.trim(), email.trim(), phone.trim(), password.trim());
       setSuccess(res.message);
+      showToast("Registration successful! Wait for admin approval.", "success");
       onRegister(res.message);
     } catch (e) {
       setError(e.message);
+      showToast(e.message, "error");
     }
   };
 
@@ -247,6 +266,22 @@ function BooksView() {
   );
 }
 
+function groupRecordsByBorrower(records) {
+  const groups = {};
+  records.forEach((record) => {
+    const key = `${record.user_id}-${record.borrower_name}`;
+    if (!groups[key]) {
+      groups[key] = {
+        borrower_name: record.borrower_name,
+        user_id: record.user_id,
+        books: [],
+      };
+    }
+    groups[key].books.push(record);
+  });
+  return Object.values(groups);
+}
+
 function RecordsView({ mode }) {
   const [records, setRecords] = useState([]);
   const [msg, setMsg] = useState("");
@@ -262,46 +297,61 @@ function RecordsView({ mode }) {
     catch (e) { setMsg(e.message); }
   };
 
-  const isOverdue = (r) =>
-    r.status === "borrowed" && new Date(r.due_date) < new Date(new Date().toDateString());
+  const grouped = groupRecordsByBorrower(records);
+  const isGroupOverdue = (group) =>
+    group.books.some((r) => r.status === "borrowed" && new Date(r.due_date) < new Date(new Date().toDateString()));
 
   return (
     <div className="card">
       <h2>{mode === "active" ? "Currently Borrowed" : "Return History"}</h2>
       {msg && <p className="error">{msg}</p>}
-      {records.length === 0 ? (
+      {grouped.length === 0 ? (
         <p className="empty">No records.</p>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Book</th><th>Subject</th><th>Borrower</th>
-              <th>Borrowed</th><th>Due</th>
+              <th>Borrower</th><th>Book</th><th>Borrowed</th><th>Due</th>
               {mode === "history" ? <th>Returned</th> : <th>Status</th>}
-              {mode === "active" && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {records.map((r) => (
-              <tr key={r.id}>
-                <td>{r.title}</td>
-                <td>{r.subject}</td>
-                <td>{r.borrower_name}</td>
-                <td>{r.borrow_date}</td>
-                <td>{r.due_date}</td>
-                {mode === "history" ? (
-                  <td><span className="badge returned">{r.returned_date}</span></td>
-                ) : (
+            {grouped.map((group) => (
+              group.books.map((book, index) => (
+                <tr key={book.id}>
+                  {index === 0 && (
+                    <td rowSpan={group.books.length}>{group.borrower_name}</td>
+                  )}
                   <td>
-                    <span className={`badge ${isOverdue(r) ? "overdue" : "borrowed"}`}>
-                      {isOverdue(r) ? "Overdue" : "Borrowed"}
-                    </span>
+                    <div className="book-group-item">
+                      <div>
+                        <strong>{book.title}</strong> <span className="meta">({book.subject})</span>
+                      </div>
+                      {mode === "active" && (
+                        <button
+                          className="button-return"
+                          onClick={() => ret(book.id)}
+                        >
+                          Return
+                        </button>
+                      )}
+                    </div>
                   </td>
-                )}
-                {mode === "active" && (
-                  <td><button className="primary" onClick={() => ret(r.id)}>Return</button></td>
-                )}
-              </tr>
+                  <td>{book.borrow_date}</td>
+                  <td>{book.due_date}</td>
+                  {mode === "history" ? (
+                    <td>{book.returned_date || "-"}</td>
+                  ) : (
+                    index === 0 ? (
+                      <td rowSpan={group.books.length}>
+                        <span className={`badge ${isGroupOverdue(group) ? "overdue" : "borrowed"}`}>
+                          {isGroupOverdue(group) ? "Overdue" : "Borrowed"}
+                        </span>
+                      </td>
+                    ) : null
+                  )}
+                </tr>
+              ))
             ))}
           </tbody>
         </table>
@@ -344,49 +394,150 @@ function StatusHistoryView() {
   );
 }
 
-function PendingUsersView() {
+function UserApprovalsView() {
   const [users, setUsers] = useState([]);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState("desc");
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(10);
+  const [total, setTotal] = useState(0);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  const load = () => api.pendingUsers().then(setUsers).catch((e) => setMessage(e.message));
-  useEffect(load, []);
+  const load = () => {
+    setLoading(true);
+    setError("");
+    setMessage("");
+    api.users({
+      status: statusFilter !== "all" ? statusFilter : undefined,
+      role: roleFilter !== "all" ? roleFilter : undefined,
+      q: query,
+      page,
+      page_size: pageSize,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+    })
+      .then((res) => {
+        setUsers(res.data || []);
+        setTotal(res.total || 0);
+      })
+      .catch((e) => {
+        console.error("Error loading users:", e);
+        setError(e.message);
+        setUsers([]);
+        setTotal(0);
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(load, [statusFilter, roleFilter, query, page, sortBy, sortDir]);
 
   const updateUser = async (userId, action) => {
     try {
-      await api.reviewUser(userId, action);
+      setError("");
+      await api.reviewUser(userId, action, "Reviewed by admin");
       setMessage(`User ${action}d successfully.`);
       load();
     } catch (e) {
-      setMessage(e.message);
+      console.error("Error updating user:", e);
+      setError(e.message);
     }
   };
 
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
   return (
     <div className="card">
-      <h2>Pending Users</h2>
-      {message && <p className="notice">{message}</p>}
-      {users.length === 0 ? (
-        <p className="empty">No pending registrations.</p>
+      <h2>User Approvals</h2>
+
+      <div className="approvals-toolbar">
+        <input
+          type="text"
+          placeholder="Search by username, email, phone"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+        />
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
+          <option value="all">All Statuses</option>
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <select value={roleFilter} onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }}>
+          <option value="all">All Roles</option>
+          <option value="admin">Admin</option>
+          <option value="staff">Staff</option>
+          <option value="user">User</option>
+        </select>
+        <select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setPage(1); }}>
+          <option value="created_at">Date Joined</option>
+          <option value="name">Name</option>
+          <option value="status">Status</option>
+          <option value="role">Role</option>
+        </select>
+        <select value={sortDir} onChange={(e) => setSortDir(e.target.value)}>
+          <option value="desc">Newest First</option>
+          <option value="asc">Oldest First</option>
+        </select>
+      </div>
+
+      {error && <p className="error">{error}</p>}
+      {message && <p className="success">{message}</p>}
+
+      {loading ? (
+        <p className="notice">Loading users...</p>
+      ) : users.length === 0 ? (
+        <p className="empty">No users found.</p>
       ) : (
-        <table>
-          <thead>
-            <tr><th>Username</th><th>Email</th><th>Phone</th><th>Requested</th><th></th></tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td>{u.username}</td>
-                <td>{u.email}</td>
-                <td>{u.phone}</td>
-                <td>{u.created_at}</td>
-                <td>
-                  <button className="primary" onClick={() => updateUser(u.id, "approve")}>Approve</button>
-                  <button className="danger" onClick={() => updateUser(u.id, "reject")}>Reject</button>
-                </td>
+        <>
+          <table>
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Requested</th>
+                <th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td>{u.username}</td>
+                  <td>{u.email}</td>
+                  <td>{u.phone}</td>
+                  <td>{u.role}</td>
+                  <td>{u.status}</td>
+                  <td>{u.created_at}</td>
+                  <td>
+                    {u.status !== "approved" && (
+                      <button className="primary" onClick={() => updateUser(u.id, "approve")}>Approve</button>
+                    )}
+                    {u.status !== "rejected" && (
+                      <button className="danger" onClick={() => updateUser(u.id, "reject")}>Reject</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="pagination">
+            <button className="primary" disabled={page <= 1} onClick={() => setPage((prev) => Math.max(prev - 1, 1))}>
+              Previous
+            </button>
+            <span>Page {page} of {totalPages}</span>
+            <button className="primary" disabled={page >= totalPages} onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}>
+              Next
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
@@ -395,37 +546,74 @@ function PendingUsersView() {
 function AdminRecordsView() {
   const [records, setRecords] = useState([]);
   const [msg, setMsg] = useState("");
+  const [active, setActive] = useState([]);
+  const [history, setHistory] = useState([]);
 
-  useEffect(() => {
-    api.history().then(setRecords).catch((e) => setMsg(e.message));
-  }, []);
+  const load = () => {
+    setMsg("");
+    api.active().then(setActive).catch((e) => setMsg(e.message));
+    api.history().then(setHistory).catch((e) => setMsg((p) => (p ? p + ' | ' + e.message : e.message)));
+  };
+
+  useEffect(() => { load(); }, []);
 
   return (
     <div className="card">
       <h2>Borrow Records</h2>
       {msg && <p className="error">{msg}</p>}
-      {records.length === 0 ? (
-        <p className="empty">No borrow history.</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Book</th><th>User</th><th>Borrowed</th><th>Returned</th><th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {records.map((r) => (
-              <tr key={r.id}>
-                <td>{r.title}</td>
-                <td>{r.borrower_name}</td>
-                <td>{r.borrow_date}</td>
-                <td>{r.returned_date || "—"}</td>
-                <td>{r.status}</td>
+
+      <section>
+        <h3>Currently Borrowed</h3>
+        {active.length === 0 ? (
+          <p className="empty">No active borrows.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Book</th><th>Subject</th><th>User</th><th>Borrowed</th><th>Due</th><th>Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {active.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.title}</td>
+                  <td>{r.subject}</td>
+                  <td>{r.borrower_name}</td>
+                  <td>{r.borrow_date}</td>
+                  <td>{r.due_date}</td>
+                  <td>{r.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section style={{ marginTop: 16 }}>
+        <h3>Returned</h3>
+        {history.length === 0 ? (
+          <p className="empty">No returned records.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Book</th><th>User</th><th>Borrowed</th><th>Returned</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.title}</td>
+                  <td>{r.borrower_name}</td>
+                  <td>{r.borrow_date}</td>
+                  <td>{r.returned_date || "—"}</td>
+                  <td>{r.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
     </div>
   );
 }

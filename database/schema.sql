@@ -3,23 +3,18 @@ DROP DATABASE IF EXISTS library_db;
 CREATE DATABASE library_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE library_db;
 
--- Admin accounts
-CREATE TABLE admins (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(100) NOT NULL UNIQUE,
-    email VARCHAR(255) NOT NULL,
-    password VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- User registration + approval state
+-- Single users table (admins/staff/users consolidated)
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) NOT NULL UNIQUE,
     email VARCHAR(255) NOT NULL UNIQUE,
     phone VARCHAR(30) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
+    role ENUM('admin','staff','user') NOT NULL DEFAULT 'user',
     status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+    profile_photo VARCHAR(255) DEFAULT NULL,
+    permanent_address TEXT DEFAULT NULL,
+    temporary_address TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -41,7 +36,9 @@ CREATE TABLE books (
     subject ENUM('Science','Kannada','English','Mathematics','Social Studies','Sanskrit','Hindi') NOT NULL,
     total_copies INT NOT NULL DEFAULT 1,
     available_copies INT NOT NULL DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_by INT DEFAULT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- Borrow & return records (records belong to approved users)
@@ -62,9 +59,9 @@ CREATE TABLE borrow_records (
     INDEX idx_user (user_id)
 );
 
--- Seed sample admin and books
-INSERT INTO admins (username, email, password) VALUES
-('admin', 'admin@example.com', 'admin123');
+-- Optionally create an admin user here, or create via the API after migrations.
+-- Example (do not use plaintext passwords in production):
+-- INSERT INTO users (username, email, password, role, status) VALUES ('admin', 'admin@example.com', '<hashed_password_here>', 'admin', 'approved');
 
 INSERT INTO books (title, author, subject, total_copies, available_copies) VALUES
 ('Fundamentals of Physics','Halliday & Resnick','Science',3,3),
