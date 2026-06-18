@@ -465,29 +465,18 @@ def borrow():
 
     conn = get_conn(); cur = conn.cursor()
     try:
-        cur.execute("SELECT available_copies FROM books WHERE id=%s FOR UPDATE", (book_id,))
-        row = cur.fetchone()
-        if not row:
-            return jsonify({"error": "Book not found"}), 404
-        if row[0] <= 0:
-            return jsonify({"error": "No copies available"}), 400
-
-        borrow_date = date.today()
-        due_date = borrow_date + timedelta(days=LOAN_DAYS)
+        # Create a borrow request; staff/admin will approve and convert to 'borrowed'
         cur.execute(
-            "INSERT INTO borrow_records (book_id, user_id, borrower_name, borrow_date, due_date, status) VALUES (%s, %s, %s, %s, %s, 'borrowed')",
-            (book_id, auth["id"], user["username"], borrow_date, due_date),
+            "INSERT INTO borrow_records (book_id, user_id, borrower_name, borrow_date, due_date, status) VALUES (%s, %s, %s, %s, %s, 'requested')",
+            (book_id, auth["id"], user["username"], None, None),
         )
         record_id = cur.lastrowid
-        cur.execute("UPDATE books SET available_copies = available_copies - 1 WHERE id=%s", (book_id,))
         conn.commit()
         return jsonify({
             "id": record_id,
             "book_id": book_id,
             "borrower_name": user["username"],
-            "borrow_date": str(borrow_date),
-            "due_date": str(due_date),
-            "status": "borrowed"
+            "status": "requested"
         }), 201
     except Exception as e:
         conn.rollback()
@@ -533,5 +522,75 @@ def index():
     return jsonify({"service": "Library Management API", "status": "ok"})
 
 
+
+
+@app.route("/api/records/requests", methods=["GET"])
+def request_records():
+    auth = get_auth()
+    if not auth or auth["role"] not in ("admin","staff"):
+        return jsonify({"error":"Forbidden"}),403
+    return jsonify(_records(auth, "WHERE r.status='requested'"))
+
+
+@app.route("/api/records/<int:record_id>/approve", methods=["POST"])
+def approve_request(record_id):
+    auth = get_auth()
+    if not auth or auth["role"] not in ("admin","staff"):
+        return jsonify({"error":"Forbidden"}),403
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT book_id, status, user_id FROM borrow_records WHERE id=%s FOR UPDATE", (record_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error":"Record not found"}),404
+        book_id, status, user_id = row
+        if status != "requested":
+            return jsonify({"error":"Record not in requested state"}),400
+        cur.execute("SELECT available_copies FROM books WHERE id=%s FOR UPDATE", (book_id,))
+        br = cur.fetchone()
+        if not br:
+            return jsonify({"error":"Book not found"}),404
+        if br[0] <= 0:
+            return jsonify({"error":"No copies available"}),400
+        borrow_date = date.today()
+        due_date = borrow_date + timedelta(days=LOAN_DAYS)
+        cur.execute("UPDATE borrow_records SET status='borrowed', borrow_date=%s, due_date=%s WHERE id=%s", (borrow_date, due_date, record_id))
+        cur.execute("UPDATE books SET available_copies = available_copies - 1 WHERE id=%s", (book_id,))
+        msg = f"Your borrow request for record {record_id} has been approved. Due {str(due_date)}."
+        cur.execute("INSERT INTO notifications (user_id, message) VALUES (%s, %s)", (user_id, msg))
+        conn.commit()
+        return jsonify({"message":"Request approved", "record_id":record_id})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error":str(e)}),500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/notifications", methods=["GET"])
+def get_notifications():
+    auth = get_auth()
+    if not auth:
+        return jsonify({"error":"Unauthorized"}),401
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT id, message, is_read, created_at FROM notifications WHERE user_id=%s ORDER BY created_at DESC LIMIT 50", (auth["id"],))
+    data = rows(cur)
+    cur.close(); conn.close()
+    return jsonify(data)
+
+
+@app.route("/api/notifications/overdue-count", methods=["GET"])
+def overdue_count():
+    auth = get_auth()
+    if not auth or auth["role"] not in ("admin","staff"):
+        return jsonify({"error":"Forbidden"}),403
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM borrow_records WHERE status='borrowed' AND due_date < %s", (date.today(),))
+    cnt = cur.fetchone()[0]
+    cur.close(); conn.close()
+    return jsonify({"count": cnt})
+
+
 if __name__ == "__main__":
+
     app.run(host="0.0.0.0", port=5000, debug=True)

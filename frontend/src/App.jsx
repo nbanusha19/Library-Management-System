@@ -9,7 +9,9 @@ const USER_TABS = [
   { key: "status", label: "Approval History" },
 ];
 const ADMIN_TABS = [
-  { key: "users", label: "User Approvals" },
+  { key: "users", label: "Users" },
+  { key: "borrowed", label: "Borrowed Books" },
+  { key: "returned", label: "Returned Books" },
   { key: "records", label: "Borrow Records" },
 ];
 
@@ -19,6 +21,17 @@ export default function App() {
   const [mode, setMode] = useState("login");
   const [message, setMessage] = useState("");
   const { toasts, showToast, removeToast } = useToast();
+  const [overdueCount, setOverdueCount] = useState(0);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+
+  const toggleNotifications = () => {
+    setShowNotifications((prev) => !prev);
+    if (!showNotifications) {
+      api.notifications().then(setNotifications).catch(() => {});
+    }
+  };
 
   useEffect(() => {
     const stored = JSON.parse(localStorage.getItem("lms_auth") || "null");
@@ -61,7 +74,24 @@ export default function App() {
           <h1>📚 Library Management System</h1>
           {user && (
             <div className="user-panel">
-              <span>{user.role === "admin" ? "Admin" : "User"}: {user.username}</span>
+              <div className="notifications">
+                <button className="bell" onClick={toggleNotifications}>
+                  🔔 {overdueCount > 0 ? <span className="count">{overdueCount}</span> : null}
+                </button>
+                {showNotifications && (
+                  <div className="notif-dropdown card">
+                    <h4>Notifications</h4>
+                    {notifications.length === 0 ? <p className="empty">No notifications</p> : (
+                      <ul>
+                        {notifications.map((n) => <li key={n.id}>{n.message} <small className="muted">{n.created_at}</small></li>)}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <span>{user.role === "admin" ? "Admin" : (user.role === "staff" ? "Staff" : "User")}: {user.username}</span>
+              <button onClick={() => { setDarkMode((d) => !d); }} title="Toggle dark mode">{darkMode ? '🌙' : '☀️'}</button>
               <button onClick={doLogout}>Logout</button>
             </div>
           )}
@@ -89,14 +119,17 @@ export default function App() {
       <main>
         {user ? (
           user.role === "admin" ? (
-            tab === "users" ? <UserApprovalsView /> : <AdminRecordsView />
+              tab === "users" ? <UserApprovalsView />
+              : tab === "borrowed" ? <BorrowedAdminView />
+              : tab === "returned" ? <ReturnedAdminView />
+              : <AdminRecordsView />
+            ) : (
+              tab === "books" ? <BooksView />
+                : tab === "active" ? <RecordsView mode="active" />
+                : tab === "history" ? <RecordsView mode="history" />
+                : <StatusHistoryView />
+            )
           ) : (
-            tab === "books" ? <BooksView />
-              : tab === "active" ? <RecordsView mode="active" />
-              : tab === "history" ? <RecordsView mode="history" />
-              : <StatusHistoryView />
-          )
-        ) : (
           mode === "login" ? <LoginView onLogin={handleLogin} message={message} showToast={showToast} /> : <RegisterView onRegister={handleRegisterSuccess} message={message} showToast={showToast} />
         )}
       </main>
@@ -614,6 +647,50 @@ function AdminRecordsView() {
           </table>
         )}
       </section>
+    </div>
+  );
+}
+
+function BorrowedAdminView() {
+  const [active, setActive] = useState([]);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api.active().then(setActive).catch((e)=>setMsg(e.message)); }, []);
+  return (
+    <div className="card">
+      <h2>Borrowed Books</h2>
+      {msg && <p className="error">{msg}</p>}
+      {active.length === 0 ? <p className="empty">No active borrows.</p> : (
+        <table>
+          <thead><tr><th>Book</th><th>User</th><th>Borrowed</th><th>Due</th><th>Status</th></tr></thead>
+          <tbody>
+            {active.map(r => (
+              <tr key={r.id}><td>{r.title}</td><td>{r.borrower_name}</td><td>{r.borrow_date}</td><td>{r.due_date}</td><td>{r.status}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function ReturnedAdminView() {
+  const [history, setHistory] = useState([]);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api.history().then(setHistory).catch((e)=>setMsg(e.message)); }, []);
+  return (
+    <div className="card">
+      <h2>Returned Books</h2>
+      {msg && <p className="error">{msg}</p>}
+      {history.length === 0 ? <p className="empty">No returned records.</p> : (
+        <table>
+          <thead><tr><th>Book</th><th>User</th><th>Borrowed</th><th>Returned</th></tr></thead>
+          <tbody>
+            {history.map(r => (
+              <tr key={r.id}><td>{r.title}</td><td>{r.borrower_name}</td><td>{r.borrow_date}</td><td>{r.returned_date || '—'}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

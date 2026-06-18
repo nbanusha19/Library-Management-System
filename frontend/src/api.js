@@ -53,4 +53,8 @@ export const api = {
     return req(`/users${query ? `?${query}` : ""}`);
   },
   myStatusHistory: () => req("/users/me/status-history"),
+  notifications: () => req("/notifications"),
+  overdueCount: () => req("/notifications/overdue-count"),
+  requests: () => req("/records/requests"),
+  approveRequest: (record_id) => req(`/records/${record_id}/approve`, { method: "POST" }),
 };

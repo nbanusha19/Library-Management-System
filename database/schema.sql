@@ -47,10 +47,10 @@ CREATE TABLE borrow_records (
     book_id INT NOT NULL,
     user_id INT NOT NULL,
     borrower_name VARCHAR(255) NOT NULL,
-    borrow_date DATE NOT NULL,
-    due_date DATE NOT NULL,
+    borrow_date DATE DEFAULT NULL,
+    due_date DATE DEFAULT NULL,
     returned_date DATE DEFAULT NULL,
-    status ENUM('borrowed','returned') NOT NULL DEFAULT 'borrowed',
+    status ENUM('requested','borrowed','returned') NOT NULL DEFAULT 'borrowed',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -58,6 +58,18 @@ CREATE TABLE borrow_records (
     INDEX idx_book (book_id),
     INDEX idx_user (user_id)
 );
+
+-- Notifications table for user/staff/admin alerts
+CREATE TABLE notifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    message VARCHAR(255) NOT NULL,
+    is_read TINYINT(1) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_notifications_user (user_id)
+);
+
 
 -- Optionally create an admin user here, or create via the API after migrations.
 -- Example (do not use plaintext passwords in production):
