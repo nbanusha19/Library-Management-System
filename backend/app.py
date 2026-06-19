@@ -148,10 +148,20 @@ def list_subjects():
 def list_books():
     subject = request.args.get("subject")
     conn = get_conn(); cur = conn.cursor()
+    # Compute available copies dynamically to avoid DB drift: total_copies - borrowed_count
     if subject:
-        cur.execute("SELECT * FROM books WHERE subject=%s ORDER BY title", (subject,))
+        cur.execute(
+            "SELECT b.id, b.title, b.author, b.subject, b.total_copies, "
+            "(b.total_copies - IFNULL((SELECT COUNT(*) FROM borrow_records r WHERE r.book_id=b.id AND r.status='borrowed'),0)) AS available_copies "
+            "FROM books b WHERE b.subject=%s ORDER BY b.title",
+            (subject,)
+        )
     else:
-        cur.execute("SELECT * FROM books ORDER BY subject, title")
+        cur.execute(
+            "SELECT b.id, b.title, b.author, b.subject, b.total_copies, "
+            "(b.total_copies - IFNULL((SELECT COUNT(*) FROM borrow_records r WHERE r.book_id=b.id AND r.status='borrowed'),0)) AS available_copies "
+            "FROM books b ORDER BY b.subject, b.title"
+        )
     data = rows(cur)
     cur.close(); conn.close()
     return jsonify(data)
@@ -270,6 +280,11 @@ def register():
 
     if not username or not email or not phone or not password:
         return jsonify({"error": "username, email, phone, and password are required"}), 400
+
+    # Validate phone number: must be exactly 10 digits
+    phone_digits = ''.join(c for c in phone if c.isdigit())
+    if len(phone_digits) != 10:
+        return jsonify({"error": "Enter valid number"}), 400
 
     # Handle profile photo if provided
     profile_photo = None
@@ -413,7 +428,7 @@ def pending_users():
 
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
-        "SELECT id, username, email, phone, status, created_at FROM users WHERE status='pending' ORDER BY created_at"
+        "SELECT id, username, email, phone, status, updated_at FROM users WHERE status='pending' ORDER BY updated_at"
     )
     data = rows(cur)
     cur.close(); conn.close()
@@ -429,7 +444,7 @@ def list_users():
     status = (request.args.get("status") or "").strip().lower()
     role = (request.args.get("role") or "").strip().lower()
     q = (request.args.get("q") or "").strip()
-    sort_by = (request.args.get("sort_by") or "created_at").strip().lower()
+    sort_by = (request.args.get("sort_by") or "updated_at").strip().lower()
     sort_dir = (request.args.get("sort_dir") or "desc").strip().lower()
     try:
         page = max(int(request.args.get("page", 1)), 1)
@@ -442,12 +457,12 @@ def list_users():
 
     sort_columns = {
         "name": "username",
-        "date_joined": "created_at",
-        "created_at": "created_at",
+            "date_joined": "updated_at",
+            "created_at": "updated_at",
         "status": "status",
         "role": "role",
     }
-    sort_col = sort_columns.get(sort_by, "created_at")
+    sort_col = sort_columns.get(sort_by, "updated_at")
     sort_dir = "asc" if sort_dir == "asc" else "desc"
 
     filters = []
@@ -474,7 +489,7 @@ def list_users():
     cur.execute(count_sql, tuple(params))
     total = cur.fetchone()[0]
 
-    query = f"SELECT id, username, email, phone, role, status, created_at FROM users {where_sql} ORDER BY {sort_col} {sort_dir} LIMIT %s OFFSET %s"
+    query = f"SELECT id, username, email, phone, role, status, updated_at FROM users {where_sql} ORDER BY {sort_col} {sort_dir} LIMIT %s OFFSET %s"
     cur.execute(query, (*params, page_size, offset))
     data = rows(cur)
     cur.close(); conn.close()
@@ -529,7 +544,7 @@ def my_status_history():
 
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
-        "SELECT status, comment, changed_at FROM user_status_history WHERE user_id=%s ORDER BY changed_at DESC",
+        "SELECT status, comment, updated_at FROM user_status_history WHERE user_id=%s ORDER BY updated_at DESC",
         (auth["id"],),
     )
     data = rows(cur)
@@ -586,6 +601,14 @@ def history_records():
     if not auth:
         return jsonify({"error": "Unauthorized"}), 401
     return jsonify(_records(auth, "WHERE r.status='returned'"))
+
+
+@app.route("/api/records/overdue", methods=["GET"])
+def overdue_records():
+    auth = get_auth()
+    if not auth or auth["role"] not in ("admin", "staff"):
+        return jsonify({"error": "Forbidden"}), 403
+    return jsonify(_records(auth, f"WHERE r.status='borrowed' AND r.due_date < '{date.today()}'"))
 
 
 @app.route("/api/borrow", methods=["POST"])
@@ -663,6 +686,11 @@ def update_profile():
 
     if not username or not email or not phone:
         return jsonify({"error": "Username, email, and phone are required."}), 400
+
+    # Validate phone number: must be exactly 10 digits
+    phone_digits = ''.join(c for c in phone if c.isdigit())
+    if len(phone_digits) != 10:
+        return jsonify({"error": "Enter valid number"}), 400
 
     conn = get_conn(); cur = conn.cursor()
     try:
@@ -829,7 +857,7 @@ def get_notifications():
     if not auth:
         return jsonify({"error":"Unauthorized"}),401
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT id, COALESCE(message, '') AS message, is_read, created_at FROM notifications WHERE user_id=%s ORDER BY created_at DESC LIMIT 50", (auth["id"],))
+    cur.execute("SELECT id, COALESCE(message, '') AS message, is_read, updated_at FROM notifications WHERE user_id=%s ORDER BY updated_at DESC LIMIT 50", (auth["id"],))
     data = rows(cur)
     if auth["role"] in ("admin", "staff"):
         cur.execute(
@@ -843,11 +871,14 @@ def get_notifications():
         )
         overdue_rows = cur.fetchall()
         for overdue in overdue_rows:
+            due_date = overdue[3]
+            late_days = (date.today() - due_date).days
+            late_text = f"{late_days} day{'s' if late_days != 1 else ''} late"
             data.insert(0, {
                 "id": f"overdue-{overdue[0]}",
-                "message": f"Overdue: {overdue[2]} has '{overdue[1]}' due {overdue[3]}",
+                "message": f"Overdue: {overdue[2]} has '{overdue[1]}' due {due_date} ({late_text})",
                 "is_read": 0,
-                "created_at": str(overdue[3]),
+                    "updated_at": str(due_date),
             })
     cur.close(); conn.close()
     return jsonify(data)

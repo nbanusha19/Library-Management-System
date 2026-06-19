@@ -43,10 +43,6 @@ export const api = {
       
       return fetch(`${API}/auth/register`, {
         method: "POST",
-        headers: {
-          "X-Auth-Role": JSON.parse(localStorage.getItem("lms_auth") || "null")?.role || "",
-          "X-Auth-User-Id": JSON.parse(localStorage.getItem("lms_auth") || "null")?.id || "",
-        },
         body: formData,
       }).then(async (res) => {
         if (!res.ok) {
@@ -91,6 +87,7 @@ export const api = {
   returnBook: (id) => req(`/return/${id}`, { method: "POST" }),
   active: () => req("/records/active"),
   history: () => req("/records/history"),
+  overdue: () => req("/records/overdue"),
   pendingUsers: () => req("/users/pending"),
   reviewUser: (user_id, action, comment) => req(`/users/${user_id}/review`, { method: "POST", body: JSON.stringify({ action, comment }) }),
   users: ({ status, role, q, page, page_size, sort_by, sort_dir } = {}) => {

@@ -15,7 +15,7 @@ CREATE TABLE users (
     profile_photo VARCHAR(255) DEFAULT NULL,
     permanent_address TEXT DEFAULT NULL,
     temporary_address TEXT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE user_status_history (
@@ -23,7 +23,7 @@ CREATE TABLE user_status_history (
     user_id INT NOT NULL,
     status ENUM('pending','approved','rejected') NOT NULL,
     comment VARCHAR(255) NOT NULL,
-    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_status_history_user (user_id)
 );
@@ -51,7 +51,7 @@ CREATE TABLE borrow_records (
     due_date DATE DEFAULT NULL,
     returned_date DATE DEFAULT NULL,
     status ENUM('requested','borrowed','returned') NOT NULL DEFAULT 'borrowed',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_status (status),
@@ -65,7 +65,7 @@ CREATE TABLE notifications (
     user_id INT NOT NULL,
     message VARCHAR(255) NOT NULL,
     is_read TINYINT(1) NOT NULL DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_notifications_user (user_id)
 );
