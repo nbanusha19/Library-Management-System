@@ -4,15 +4,26 @@ from dotenv import load_dotenv
 # Load environment variables from backend/.env when present
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 from datetime import date, timedelta
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import mysql.connector
 from mysql.connector import pooling
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+import time
 
 app = Flask(__name__)
 # Use a permissive CORS during development to avoid preflight issues from the frontend dev server
 CORS(app, supports_credentials=True)
+
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif"}
+
+
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 
 @app.after_request
@@ -64,10 +75,16 @@ def get_auth():
     return {"role": role, "id": user_id}
 
 
+def build_photo_url(photo_path):
+    if not photo_path:
+        return None
+    return f"{request.url_root.rstrip('/')}/uploads/{photo_path}"
+
+
 def find_user_by_id(user_id):
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
-        "SELECT id, username, email, phone, status FROM users WHERE id=%s", (user_id,)
+        "SELECT id, username, email, phone, status, role, profile_photo, permanent_address, temporary_address FROM users WHERE id=%s", (user_id,)
     )
     row = cur.fetchone()
     cur.close(); conn.close()
@@ -75,7 +92,10 @@ def find_user_by_id(user_id):
         return None
     return {
         "id": row[0], "username": row[1], "email": row[2],
-        "phone": row[3], "status": row[4]
+        "phone": row[3], "status": row[4], "role": row[5],
+        "profile_photo": row[6],
+        "permanent_address": row[7],
+        "temporary_address": row[8],
     }
 
 
@@ -92,7 +112,7 @@ def find_admin_by_id(admin_id):
 def get_user_by_username(username):
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
-        "SELECT id, username, email, phone, password, status, role, profile_photo FROM users WHERE username=%s", (username,)
+        "SELECT id, username, email, phone, password, status, role, profile_photo, permanent_address, temporary_address FROM users WHERE username=%s", (username,)
     )
     row = cur.fetchone()
     cur.close(); conn.close()
@@ -100,7 +120,10 @@ def get_user_by_username(username):
         return None
     return {
         "id": row[0], "username": row[1], "email": row[2],
-        "phone": row[3], "password": row[4], "status": row[5], "role": row[6], "profile_photo": row[7]
+        "phone": row[3], "password": row[4], "status": row[5], "role": row[6],
+        "profile_photo": row[7],
+        "permanent_address": row[8],
+        "temporary_address": row[9],
     }
 
 
@@ -134,16 +157,132 @@ def list_books():
     return jsonify(data)
 
 
+@app.route("/api/books", methods=["POST"])
+def add_book():
+    auth = get_auth()
+    if not auth or auth["role"] != "admin":
+        return jsonify({"error": "Forbidden"}), 403
+    payload = request.get_json() or {}
+    title = (payload.get("title") or "").strip()
+    author = (payload.get("author") or "").strip()
+    subject = (payload.get("subject") or "").strip()
+    try:
+        total_copies = int(payload.get("total_copies") or 1)
+    except Exception:
+        total_copies = 1
+    if not title or not author or not subject:
+        return jsonify({"error": "title, author and subject required"}), 400
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO books (title, author, subject, total_copies, available_copies, created_by) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (title, author, subject, total_copies, total_copies, auth["id"]))
+        book_id = cur.lastrowid
+        conn.commit()
+        cur.execute("SELECT * FROM books WHERE id=%s", (book_id,))
+        row = cur.fetchone()
+        cols = [c[0] for c in cur.description]
+        cur.close(); conn.close()
+        return jsonify(dict(zip(cols, row)))
+    except Exception as e:
+        conn.rollback()
+        cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/books/<int:book_id>", methods=["DELETE"])
+def delete_book(book_id):
+    auth = get_auth()
+    if not auth or auth["role"] != "admin":
+        return jsonify({"error": "Forbidden"}), 403
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM books WHERE id=%s", (book_id,))
+        if not cur.fetchone():
+            cur.close(); conn.close()
+            return jsonify({"error": "Book not found"}), 404
+        cur.execute("DELETE FROM books WHERE id=%s", (book_id,))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"message": "Book deleted"})
+    except Exception as e:
+        conn.rollback(); cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/admin/dashboard", methods=["GET"])
+def admin_dashboard():
+    auth = get_auth()
+    if not auth or auth["role"] not in ("admin","staff"):
+        return jsonify({"error": "Forbidden"}), 403
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        # basic metrics
+        cur.execute("SELECT COUNT(*) FROM books")
+        total_books = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM users")
+        total_users = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM borrow_records WHERE status='borrowed'")
+        borrowed = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM borrow_records WHERE status='borrowed' AND due_date < %s", (date.today(),))
+        overdue = cur.fetchone()[0]
+
+        # upcoming due dates (next 7 days)
+        cur.execute("SELECT r.id, r.book_id, b.title, r.user_id, r.borrower_name, r.due_date FROM borrow_records r JOIN books b ON b.id=r.book_id WHERE r.status='borrowed' AND r.due_date BETWEEN %s AND %s ORDER BY r.due_date ASC LIMIT 50", (date.today(), date.today() + timedelta(days=7)))
+        upcoming = rows(cur)
+
+        # recent activity: borrows in last 7 days grouped by day
+        cur.execute("SELECT borrow_date, COUNT(*) FROM borrow_records WHERE borrow_date BETWEEN %s AND %s GROUP BY borrow_date ORDER BY borrow_date ASC", (date.today() - timedelta(days=6), date.today()))
+        activity_rows = cur.fetchall()
+        activity = [{"date": str(r[0]), "count": r[1]} for r in activity_rows]
+
+        cur.close(); conn.close()
+        return jsonify({
+            "total_books": total_books,
+            "total_users": total_users,
+            "borrowed": borrowed,
+            "overdue": overdue,
+            "upcoming": upcoming,
+            "activity": activity,
+        })
+    except Exception as e:
+        cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/auth/register", methods=["POST"])
 def register():
-    payload = request.get_json() or {}
-    username = (payload.get("username") or "").strip()
-    email = (payload.get("email") or "").strip()
-    phone = (payload.get("phone") or "").strip()
-    password = (payload.get("password") or "").strip()
+    # Support both JSON and form-data (for file uploads)
+    if request.is_json:
+        payload = request.get_json() or {}
+        username = (payload.get("username") or "").strip()
+        email = (payload.get("email") or "").strip()
+        phone = (payload.get("phone") or "").strip()
+        password = (payload.get("password") or "").strip()
+        permanent_address = (payload.get("permanent_address") or "").strip() or None
+        temporary_address = (payload.get("temporary_address") or "").strip() or None
+    else:
+        username = (request.form.get("username") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+        password = (request.form.get("password") or "").strip()
+        permanent_address = (request.form.get("permanent_address") or "").strip() or None
+        temporary_address = (request.form.get("temporary_address") or "").strip() or None
 
     if not username or not email or not phone or not password:
         return jsonify({"error": "username, email, phone, and password are required"}), 400
+
+    # Handle profile photo if provided
+    profile_photo = None
+    if "profile_photo" in request.files:
+        photo = request.files["profile_photo"]
+        if photo and allowed_file(photo.filename):
+            filename = secure_filename(photo.filename)
+            filename = f"{int(time.time())}_{filename}"
+            save_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+            photo.save(save_path)
+            profile_photo = filename
+        else:
+            return jsonify({"error": "Invalid image file"}), 400
 
     conn = get_conn(); cur = conn.cursor()
     try:
@@ -155,16 +294,16 @@ def register():
             return jsonify({"error": "Username, email, or phone already registered"}), 400
         hashed = generate_password_hash(password)
         cur.execute(
-            "INSERT INTO users (username, email, phone, password, status, role) VALUES (%s, %s, %s, %s, 'pending', 'user')",
-            (username, email, phone, hashed),
+            "INSERT INTO users (username, email, phone, password, status, role, permanent_address, temporary_address, profile_photo) VALUES (%s, %s, %s, %s, 'pending', 'user', %s, %s, %s)",
+            (username, email, phone, hashed, permanent_address, temporary_address, profile_photo),
         )
         user_id = cur.lastrowid
         cur.execute(
-            "INSERT INTO user_status_history (user_id, status, comment) VALUES (%s, 'pending', 'Registered and waiting for approval')",
+            "INSERT INTO user_status_history (user_id, status, comment) VALUES (%s, 'pending', 'Registered - awaiting admin approval')",
             (user_id,),
         )
         conn.commit()
-        return jsonify({"message": "Registration complete. Wait for admin approval."}), 201
+        return jsonify({"message": "Registration complete. Your account is pending admin approval."}), 201
     except Exception as e:
         conn.rollback()
         return jsonify({"error": str(e)}), 500
@@ -196,7 +335,9 @@ def login():
             "phone": user["phone"],
             "status": user["status"],
             "role": user.get("role", "user"),
-            "profile_photo": user.get("profile_photo")
+            "profile_photo": build_photo_url(user.get("profile_photo")),
+            "permanent_address": user.get("permanent_address"),
+            "temporary_address": user.get("temporary_address"),
         }
     })
 
@@ -215,7 +356,8 @@ def auth_me():
     user = find_user_by_id(auth["id"])
     if not user:
         return jsonify({"error": "Unauthorized"}), 401
-    user["role"] = "user"
+    user["role"] = user.get("role", "user")
+    user["profile_photo"] = build_photo_url(user.get("profile_photo"))
     return jsonify(user)
 
 
@@ -435,7 +577,7 @@ def active_records():
     auth = get_auth()
     if not auth:
         return jsonify({"error": "Unauthorized"}), 401
-    return jsonify(_records(auth, "WHERE r.status='borrowed'"))
+    return jsonify(_records(auth, "WHERE r.status IN ('requested', 'borrowed')"))
 
 
 @app.route("/api/records/history", methods=["GET"])
@@ -455,8 +597,8 @@ def borrow():
     user = find_user_by_id(auth["id"])
     if not user:
         return jsonify({"error": "User not found"}), 401
-    if user["status"] != "approved":
-        return jsonify({"error": "Account not approved"}), 403
+    if user["status"] == "rejected":
+        return jsonify({"error": "Account rejected"}), 403
 
     payload = request.get_json() or {}
     book_id = payload.get("book_id")
@@ -467,8 +609,8 @@ def borrow():
     try:
         # Create a borrow request; staff/admin will approve and convert to 'borrowed'
         cur.execute(
-            "INSERT INTO borrow_records (book_id, user_id, borrower_name, borrow_date, due_date, status) VALUES (%s, %s, %s, %s, %s, 'requested')",
-            (book_id, auth["id"], user["username"], None, None),
+            "INSERT INTO borrow_records (book_id, user_id, borrower_name, status) VALUES (%s, %s, %s, 'requested')",
+            (book_id, auth["id"], user["username"]),
         )
         record_id = cur.lastrowid
         conn.commit()
@@ -478,6 +620,79 @@ def borrow():
             "borrower_name": user["username"],
             "status": "requested"
         }), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/api/users/me/profile", methods=["POST"])
+def update_profile():
+    auth = get_auth()
+    if not auth or auth["role"] not in ("user", "staff", "admin"):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    if request.is_json:
+        payload = request.get_json() or {}
+        username = (payload.get("username") or "").strip()
+        email = (payload.get("email") or "").strip()
+        phone = (payload.get("phone") or "").strip()
+        password = (payload.get("password") or "").strip() or None
+        permanent_address = (payload.get("permanent_address") or "").strip() or None
+        temporary_address = (payload.get("temporary_address") or "").strip() or None
+    else:
+        username = (request.form.get("username") or "").strip()
+        email = (request.form.get("email") or "").strip()
+        phone = (request.form.get("phone") or "").strip()
+        password = (request.form.get("password") or "").strip() or None
+        permanent_address = (request.form.get("permanent_address") or "").strip() or None
+        temporary_address = (request.form.get("temporary_address") or "").strip() or None
+
+    profile_photo = None
+    if "profile_photo" in request.files:
+        photo = request.files["profile_photo"]
+        if photo and allowed_file(photo.filename):
+            filename = secure_filename(photo.filename)
+            filename = f"{int(time.time())}_{filename}"
+            save_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+            photo.save(save_path)
+            profile_photo = filename
+        else:
+            return jsonify({"error": "Invalid image file"}), 400
+
+    if not username or not email or not phone:
+        return jsonify({"error": "Username, email, and phone are required."}), 400
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM users WHERE username=%s AND id<>%s", (username, auth["id"]))
+        if cur.fetchone()[0] > 0:
+            return jsonify({"error": "Username already taken."}), 400
+        cur.execute("SELECT COUNT(*) FROM users WHERE email=%s AND id<>%s", (email, auth["id"]))
+        if cur.fetchone()[0] > 0:
+            return jsonify({"error": "Email already in use."}), 400
+        cur.execute("SELECT COUNT(*) FROM users WHERE phone=%s AND id<>%s", (phone, auth["id"]))
+        if cur.fetchone()[0] > 0:
+            return jsonify({"error": "Phone number already in use."}), 400
+
+        updates = ["username=%s", "email=%s", "phone=%s", "permanent_address=%s", "temporary_address=%s"]
+        params = [username, email, phone, permanent_address, temporary_address]
+
+        if password:
+            hashed = generate_password_hash(password)
+            updates.append("password=%s")
+            params.append(hashed)
+        if profile_photo is not None:
+            updates.append("profile_photo=%s")
+            params.append(profile_photo)
+
+        params.append(auth["id"])
+        cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=%s", tuple(params))
+        conn.commit()
+        updated_user = find_user_by_id(auth["id"])
+        updated_user["profile_photo"] = build_photo_url(updated_user.get("profile_photo"))
+        return jsonify(updated_user)
     except Exception as e:
         conn.rollback()
         return jsonify({"error": str(e)}), 500
@@ -546,17 +761,23 @@ def approve_request(record_id):
         book_id, status, user_id = row
         if status != "requested":
             return jsonify({"error":"Record not in requested state"}),400
-        cur.execute("SELECT available_copies FROM books WHERE id=%s FOR UPDATE", (book_id,))
+        cur.execute("SELECT b.title, b.available_copies FROM books b WHERE b.id=%s FOR UPDATE", (book_id,))
         br = cur.fetchone()
         if not br:
             return jsonify({"error":"Book not found"}),404
-        if br[0] <= 0:
-            return jsonify({"error":"No copies available"}),400
+        book_title, available_copies = br
+        # Do not approve if only one copy remains; reject and notify user
+        if available_copies <= 1:
+            msg = f"Staff has rejected your borrow request for \"{book_title}\" because only one copy is available. Please read it in the library; it is not available to borrow."
+            cur.execute("UPDATE borrow_records SET status='rejected' WHERE id=%s", (record_id,))
+            cur.execute("INSERT INTO notifications (user_id, message) VALUES (%s, %s)", (user_id, msg))
+            conn.commit()
+            return jsonify({"message":"Request auto-rejected (single copy)", "record_id":record_id, "reason": msg}), 200
         borrow_date = date.today()
         due_date = borrow_date + timedelta(days=LOAN_DAYS)
         cur.execute("UPDATE borrow_records SET status='borrowed', borrow_date=%s, due_date=%s WHERE id=%s", (borrow_date, due_date, record_id))
         cur.execute("UPDATE books SET available_copies = available_copies - 1 WHERE id=%s", (book_id,))
-        msg = f"Your borrow request for record {record_id} has been approved. Due {str(due_date)}."
+        msg = f"Staff has approved your borrow request for \"{book_title}\". Please collect the book and return by {str(due_date)}."
         cur.execute("INSERT INTO notifications (user_id, message) VALUES (%s, %s)", (user_id, msg))
         conn.commit()
         return jsonify({"message":"Request approved", "record_id":record_id})
@@ -567,14 +788,67 @@ def approve_request(record_id):
         cur.close(); conn.close()
 
 
+@app.route("/api/records/<int:record_id>/reject", methods=["POST"])
+def reject_request(record_id):
+    auth = get_auth()
+    if not auth or auth["role"] not in ("admin","staff"):
+        return jsonify({"error":"Forbidden"}),403
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT book_id, status, user_id FROM borrow_records WHERE id=%s FOR UPDATE", (record_id,))
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error":"Record not found"}),404
+        book_id, status, user_id = row
+        if status != "requested":
+            return jsonify({"error":"Record not in requested state"}),400
+
+        cur.execute("SELECT title FROM books WHERE id=%s", (book_id,))
+        br = cur.fetchone()
+        book_title = br[0] if br else "requested book"
+        cur.execute("UPDATE borrow_records SET status='rejected' WHERE id=%s", (record_id,))
+        msg = f"Your borrow request for \"{book_title}\" has been rejected by staff."
+        cur.execute("INSERT INTO notifications (user_id, message) VALUES (%s, %s)", (user_id, msg))
+        conn.commit()
+        return jsonify({"message":"Request rejected", "record_id":record_id})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error":str(e)}),500
+    finally:
+        cur.close(); conn.close()
+
+
+@app.route("/uploads/<path:filename>", methods=["GET"])
+def serve_upload(filename):
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+
+
 @app.route("/api/notifications", methods=["GET"])
 def get_notifications():
     auth = get_auth()
     if not auth:
         return jsonify({"error":"Unauthorized"}),401
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT id, message, is_read, created_at FROM notifications WHERE user_id=%s ORDER BY created_at DESC LIMIT 50", (auth["id"],))
+    cur.execute("SELECT id, COALESCE(message, '') AS message, is_read, created_at FROM notifications WHERE user_id=%s ORDER BY created_at DESC LIMIT 50", (auth["id"],))
     data = rows(cur)
+    if auth["role"] in ("admin", "staff"):
+        cur.execute(
+            "SELECT r.id, b.title, u.username, r.due_date "
+            "FROM borrow_records r "
+            "JOIN books b ON b.id = r.book_id "
+            "JOIN users u ON u.id = r.user_id "
+            "WHERE r.status = 'borrowed' AND r.due_date < %s "
+            "ORDER BY r.due_date ASC LIMIT 10",
+            (date.today(),)
+        )
+        overdue_rows = cur.fetchall()
+        for overdue in overdue_rows:
+            data.insert(0, {
+                "id": f"overdue-{overdue[0]}",
+                "message": f"Overdue: {overdue[2]} has '{overdue[1]}' due {overdue[3]}",
+                "is_read": 0,
+                "created_at": str(overdue[3]),
+            })
     cur.close(); conn.close()
     return jsonify(data)
 
