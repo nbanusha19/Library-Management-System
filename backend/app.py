@@ -36,7 +36,7 @@ def add_cors_headers(response):
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "127.0.0.1"),
     "user": os.getenv("DB_USER", "root"),
-    "password": os.getenv("DB_PASSWORD") or "Anushanb@19",  # fallback default for dev
+    "password": os.getenv("DB_PASSWORD") or "",  # fallback default for dev
     "database": os.getenv("DB_NAME", "library_db"),
 }
 
