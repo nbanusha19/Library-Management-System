@@ -37,21 +37,23 @@ export default function RequestsPage({ showToast }) {
         <table>
           <thead>
             <tr>
-              <th>Book</th>
-              <th>User</th>
-              <th>Requested</th>
-              <th>Action</th>
+              <th>Request ID</th>
+              <th>User Name</th>
+              <th>Book Title</th>
+              <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {requests.map((r) => (
               <tr key={r.id}>
-                <td>{r.title}</td>
+                <td>#{r.id}</td>
                 <td>{r.borrower_name}</td>
-                <td>{r.borrow_date || '-'}</td>
+                <td>{r.title}</td>
+                <td><span className="badge">{r.status}</span></td>
                 <td>
-                  <button className="primary" onClick={() => act(r.id, "approve")}>Approve</button>
-                  <button className="danger" onClick={() => act(r.id, "reject")}>Reject</button>
+                  <button className="btn-action primary" onClick={() => act(r.id, "approve")}>✓ Approve</button>
+                  <button className="btn-action danger" onClick={() => act(r.id, "reject")}>✕ Reject</button>
                 </td>
               </tr>
             ))}

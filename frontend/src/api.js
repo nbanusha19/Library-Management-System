@@ -12,18 +12,33 @@ function authHeaders() {
 
 async function req(path, opts = {}) {
   try {
+    console.log(`[API] ${opts.method || "GET"} ${API}${path}`, { body: opts.body ? "..." : "none" });
+    
     const res = await fetch(`${API}${path}`, {
       headers: { ...authHeaders(), ...(opts.headers || {}) },
       ...opts,
     });
+    
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${res.status}`);
+      let err = {};
+      try {
+        err = await res.json();
+      } catch {
+        err = { error: `HTTP ${res.status}` };
+      }
+      const errorMsg = err.error || err.message || `Request failed with status ${res.status}`;
+      console.error(`[API Error] ${res.status}:`, errorMsg);
+      throw new Error(errorMsg);
     }
-    return res.json();
+    
+    const data = await res.json();
+    console.log(`[API Success] ${opts.method || "GET"} ${path}`, data);
+    return data;
   } catch (e) {
     // Network or CORS error
-    throw new Error(e.message || "Network error: failed to fetch");
+    const errorMsg = e.message || "Network error: Unable to reach the server. Check your connection and ensure the backend is running on http://localhost:5000";
+    console.error(`[API Failed]`, e);
+    throw new Error(errorMsg);
   }
 }
 
@@ -41,17 +56,33 @@ export const api = {
       formData.append("temporary_address", temporary_address);
       formData.append("profile_photo", photoFile);
       
+      console.log(`[API] POST ${API}/auth/register (with photo)`);
       return fetch(`${API}/auth/register`, {
         method: "POST",
+        headers: {
+          "X-Auth-Role": JSON.parse(localStorage.getItem("lms_auth") || "null")?.role || "",
+          "X-Auth-User-Id": JSON.parse(localStorage.getItem("lms_auth") || "null")?.id || "",
+        },
         body: formData,
       }).then(async (res) => {
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `HTTP ${res.status}`);
+          let err = {};
+          try {
+            err = await res.json();
+          } catch {
+            err = { error: `HTTP ${res.status}` };
+          }
+          const errorMsg = err.error || err.message || `Registration failed with status ${res.status}`;
+          console.error(`[API Error] ${res.status}:`, errorMsg);
+          throw new Error(errorMsg);
         }
-        return res.json();
+        const data = await res.json();
+        console.log(`[API Success] POST /auth/register`, data);
+        return data;
       }).catch((e) => {
-        throw new Error(e.message || "Network error: failed to fetch");
+        const errorMsg = e.message || "Network error: Unable to reach the server";
+        console.error(`[API Failed] Register:`, e);
+        throw new Error(errorMsg);
       });
     } else {
       return req("/auth/register", {
@@ -78,6 +109,8 @@ export const api = {
   },
   me: () => req("/auth/me"),
   createBook: (title, author, subject, total_copies) => req("/books", { method: "POST", body: JSON.stringify({ title, author, subject, total_copies }) }),
+  updateBook: (id, title, author, subject, available_copies, total_copies) => req(`/books/${id}`, { method: "PUT", body: JSON.stringify({ title, author, subject, available_copies, total_copies }) }),
+  updateBookCopies: (id, added_copies) => req(`/books/${id}/copies`, { method: "PATCH", body: JSON.stringify({ added_copies }) }),
   deleteBook: (id) => req(`/books/${id}`, { method: "DELETE" }),
   adminDashboard: () => req("/admin/dashboard"),
   debug: () => req("/auth/debug"),
@@ -105,7 +138,10 @@ export const api = {
   myStatusHistory: () => req("/users/me/status-history"),
   notifications: () => req("/notifications"),
   overdueCount: () => req("/notifications/overdue-count"),
+  markNotificationRead: (notificationId) => req(`/notifications/${notificationId}/read`, { method: "POST" }),
+  markAllNotificationsRead: () => req("/notifications/mark-all-read", { method: "POST" }),
   requests: () => req("/records/requests"),
   approveRequest: (record_id) => req(`/records/${record_id}/approve`, { method: "POST" }),
   rejectRequest: (record_id) => req(`/records/${record_id}/reject`, { method: "POST" }),
+  getProfile: () => req("/profile"),
 };

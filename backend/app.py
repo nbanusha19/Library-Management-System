@@ -30,7 +30,7 @@ def allowed_file(filename):
 def add_cors_headers(response):
     response.headers.setdefault("Access-Control-Allow-Origin", "*")
     response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, X-Auth-Role, X-Auth-User-Id")
-    response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+    response.headers.setdefault("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
     return response
 
 DB_CONFIG = {
@@ -199,6 +199,76 @@ def add_book():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/books/<int:book_id>", methods=["PUT"])
+def edit_book(book_id):
+    auth = get_auth()
+    if not auth or auth["role"] != "admin":
+        return jsonify({"error": "Forbidden"}), 403
+    
+    payload = request.get_json() or {}
+    title = (payload.get("title") or "").strip()
+    author = (payload.get("author") or "").strip()
+    subject = (payload.get("subject") or "").strip()
+    
+    try:
+        available_copies = int(payload.get("available_copies") or 0)
+        total_copies = int(payload.get("total_copies") or 0)
+    except (ValueError, TypeError):
+        return jsonify({"error": "available_copies and total_copies must be integers"}), 400
+    
+    if not title or not author or not subject:
+        return jsonify({"error": "title, author and subject are required"}), 400
+    
+    if available_copies < 0 or total_copies < 0:
+        return jsonify({"error": "Copies cannot be negative"}), 400
+    
+    if available_copies > total_copies:
+        return jsonify({"error": "Available copies cannot exceed total copies"}), 400
+    
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        # Check if book exists and get current borrowed copies
+        cur.execute(
+            "SELECT id, total_copies FROM books WHERE id=%s",
+            (book_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close(); conn.close()
+            return jsonify({"error": "Book not found"}), 404
+        
+        # Calculate borrowed copies: total_copies - available_copies
+        borrowed_copies = row[1] - available_copies
+        if total_copies < borrowed_copies:
+            cur.close(); conn.close()
+            return jsonify({"error": f"Total copies cannot be less than borrowed copies ({borrowed_copies})"}), 400
+        
+        # Update the book
+        cur.execute(
+            "UPDATE books SET title=%s, author=%s, subject=%s, total_copies=%s, available_copies=%s WHERE id=%s",
+            (title, author, subject, total_copies, available_copies, book_id)
+        )
+        conn.commit()
+        
+        # Return updated book
+        cur.execute("SELECT id, title, author, subject, total_copies, available_copies FROM books WHERE id=%s", (book_id,))
+        row = cur.fetchone()
+        updated_book = {
+            "id": row[0],
+            "title": row[1],
+            "author": row[2],
+            "subject": row[3],
+            "total_copies": row[4],
+            "available_copies": row[5]
+        }
+        cur.close(); conn.close()
+        return jsonify(updated_book)
+    except Exception as e:
+        conn.rollback()
+        cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/books/<int:book_id>", methods=["DELETE"])
 def delete_book(book_id):
     auth = get_auth()
@@ -229,19 +299,41 @@ def admin_dashboard():
         # basic metrics
         cur.execute("SELECT COUNT(*) FROM books")
         total_books = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM users")
+        cur.execute("SELECT COUNT(*) FROM users WHERE role='user'")
         total_users = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM borrow_records WHERE status='borrowed'")
+        
+        # Active borrowed (returned_date IS NULL)
+        cur.execute("SELECT COUNT(*) FROM borrow_records WHERE returned_date IS NULL")
         borrowed = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM borrow_records WHERE status='borrowed' AND due_date < %s", (date.today(),))
+        
+        # Overdue (returned_date IS NULL AND due_date < today)
+        cur.execute("SELECT COUNT(*) FROM borrow_records WHERE returned_date IS NULL AND due_date < %s", (date.today(),))
         overdue = cur.fetchone()[0]
 
-        # upcoming due dates (next 7 days)
-        cur.execute("SELECT r.id, r.book_id, b.title, r.user_id, r.borrower_name, r.due_date FROM borrow_records r JOIN books b ON b.id=r.book_id WHERE r.status='borrowed' AND r.due_date BETWEEN %s AND %s ORDER BY r.due_date ASC LIMIT 50", (date.today(), date.today() + timedelta(days=7)))
+        # upcoming due dates (next 7 days, not yet returned)
+        cur.execute(
+            "SELECT r.id, r.book_id, b.title, r.user_id, r.borrower_name, r.due_date FROM borrow_records r "
+            "JOIN books b ON b.id=r.book_id "
+            "WHERE r.returned_date IS NULL AND r.due_date BETWEEN %s AND %s "
+            "ORDER BY r.due_date ASC LIMIT 50",
+            (date.today(), date.today() + timedelta(days=7))
+        )
         upcoming = rows(cur)
 
+        # borrower statistics: books borrowed by each borrower (active only)
+        cur.execute(
+            "SELECT borrower_name, COUNT(*) FROM borrow_records WHERE returned_date IS NULL "
+            "GROUP BY borrower_name ORDER BY COUNT(*) DESC LIMIT 20"
+        )
+        borrower_rows = cur.fetchall()
+        borrower_stats = [{"name": r[0], "count": r[1]} for r in borrower_rows]
+
         # recent activity: borrows in last 7 days grouped by day
-        cur.execute("SELECT borrow_date, COUNT(*) FROM borrow_records WHERE borrow_date BETWEEN %s AND %s GROUP BY borrow_date ORDER BY borrow_date ASC", (date.today() - timedelta(days=6), date.today()))
+        cur.execute(
+            "SELECT borrow_date, COUNT(*) FROM borrow_records WHERE borrow_date BETWEEN %s AND %s AND borrow_date IS NOT NULL "
+            "GROUP BY borrow_date ORDER BY borrow_date ASC",
+            (date.today() - timedelta(days=6), date.today())
+        )
         activity_rows = cur.fetchall()
         activity = [{"date": str(r[0]), "count": r[1]} for r in activity_rows]
 
@@ -252,6 +344,7 @@ def admin_dashboard():
             "borrowed": borrowed,
             "overdue": overdue,
             "upcoming": upcoming,
+            "borrower_stats": borrower_stats,
             "activity": activity,
         })
     except Exception as e:
@@ -317,6 +410,21 @@ def register():
             "INSERT INTO user_status_history (user_id, status, comment) VALUES (%s, 'pending', 'Registered - awaiting admin approval')",
             (user_id,),
         )
+        
+        # Create notification for all admin users
+        notification_message = f"New user {username} is waiting for approval"
+        notification_title = f"User Registration: {username}"
+        
+        cur.execute("SELECT id FROM users WHERE role='admin'")
+        admin_users = cur.fetchall()
+        
+        for admin_row in admin_users:
+            admin_id = admin_row[0]
+            cur.execute(
+                "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id) VALUES (%s, %s, %s, %s, %s, %s)",
+                (admin_id, 'admin', notification_title, notification_message, 'USER_REGISTRATION', user_id)
+            )
+        
         conn.commit()
         return jsonify({"message": "Registration complete. Your account is pending admin approval."}), 201
     except Exception as e:
@@ -438,7 +546,7 @@ def pending_users():
 @app.route("/api/users", methods=["GET"])
 def list_users():
     auth = get_auth()
-    if not auth or auth["role"] != "admin":
+    if not auth or auth["role"] not in ("admin", "staff"):
         return jsonify({"error": "Forbidden"}), 403
 
     status = (request.args.get("status") or "").strip().lower()
@@ -527,6 +635,23 @@ def review_user(user_id):
             "INSERT INTO user_status_history (user_id, status, comment) VALUES (%s, %s, %s)",
             (user_id, target_status, comment or f"{action.capitalize()}ed by admin"),
         )
+        # Notify the user about their review status
+        if action == "approve":
+            title = "User Approved"
+            msg = "Your account has been approved. You can now log in and access the library."
+            cur.execute(
+                "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id) VALUES (%s, %s, %s, %s, %s, %s)",
+                (user_id, 'user', title, msg, 'OTHER', user_id)
+            )
+        else:
+            # rejection message may include the comment if provided
+            title = "User Rejected"
+            reason = comment or "Your registration was rejected by admin."
+            msg = f"Registration update: {reason}"
+            cur.execute(
+                "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id) VALUES (%s, %s, %s, %s, %s, %s)",
+                (user_id, 'user', title, msg, 'OTHER', user_id)
+            )
         conn.commit()
         return jsonify({"message": f"User {target_status}."})
     except Exception as e:
@@ -568,6 +693,8 @@ def _records(auth=None, base_where="", params=()):
               FROM borrow_records r
               JOIN books b ON b.id = r.book_id
               {where_sql}
+              AND r.borrow_date IS NOT NULL
+              AND r.due_date IS NOT NULL
               ORDER BY r.borrow_date DESC, r.id DESC"""
     cur.execute(sql, params)
     data = rows(cur)
@@ -577,6 +704,7 @@ def _records(auth=None, base_where="", params=()):
             if d.get(k) is not None:
                 d[k] = str(d[k])
     return data
+
 
 
 @app.route("/api/records", methods=["GET"])
@@ -592,7 +720,9 @@ def active_records():
     auth = get_auth()
     if not auth:
         return jsonify({"error": "Unauthorized"}), 401
-    return jsonify(_records(auth, "WHERE r.status IN ('requested', 'borrowed')"))
+    # Include all records that haven't been returned (returned_date IS NULL)
+    # This includes both borrowed and overdue books
+    return jsonify(_records(auth, "WHERE r.returned_date IS NULL"))
 
 
 @app.route("/api/records/history", methods=["GET"])
@@ -608,7 +738,7 @@ def overdue_records():
     auth = get_auth()
     if not auth or auth["role"] not in ("admin", "staff"):
         return jsonify({"error": "Forbidden"}), 403
-    return jsonify(_records(auth, f"WHERE r.status='borrowed' AND r.due_date < '{date.today()}'"))
+    return jsonify(_records(auth, f"WHERE r.status='overdue' OR (r.status='borrowed' AND r.due_date < '{date.today()}')"))
 
 
 @app.route("/api/borrow", methods=["POST"])
@@ -630,12 +760,33 @@ def borrow():
 
     conn = get_conn(); cur = conn.cursor()
     try:
+        # Get book title for notification
+        cur.execute("SELECT title FROM books WHERE id=%s", (book_id,))
+        book_row = cur.fetchone()
+        book_title = book_row[0] if book_row else "Unknown Book"
+        
         # Create a borrow request; staff/admin will approve and convert to 'borrowed'
         cur.execute(
             "INSERT INTO borrow_records (book_id, user_id, borrower_name, status) VALUES (%s, %s, %s, 'requested')",
             (book_id, auth["id"], user["username"]),
         )
         record_id = cur.lastrowid
+        
+        # Create notification for all staff members
+        notification_message = f"{user['username']} requested to borrow {book_title}"
+        notification_title = f"Borrow Request: {book_title}"
+        
+        # Get all staff and admin users
+        cur.execute("SELECT id FROM users WHERE role IN ('staff', 'admin')")
+        staff_users = cur.fetchall()
+        
+        for staff_row in staff_users:
+            staff_id = staff_row[0]
+            cur.execute(
+                "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id) VALUES (%s, %s, %s, %s, %s, %s)",
+                (staff_id, 'staff', notification_title, notification_message, 'BORROW_REQUEST', record_id)
+            )
+        
         conn.commit()
         return jsonify({
             "id": record_id,
@@ -651,7 +802,7 @@ def borrow():
 
 
 @app.route("/api/users/me/profile", methods=["POST"])
-def update_profile():
+def update_user_profile_with_photo():
     auth = get_auth()
     if not auth or auth["role"] not in ("user", "staff", "admin"):
         return jsonify({"error": "Unauthorized"}), 401
@@ -772,7 +923,25 @@ def request_records():
     auth = get_auth()
     if not auth or auth["role"] not in ("admin","staff"):
         return jsonify({"error":"Forbidden"}),403
-    return jsonify(_records(auth, "WHERE r.status='requested'"))
+    
+    # Fetch all pending requests (status='requested') without the borrow_date/due_date constraint
+    # because these are NULL until the request is approved
+    conn = get_conn(); cur = conn.cursor()
+    sql = """SELECT r.id, r.book_id, b.title, b.subject, b.author,
+                     r.user_id, r.borrower_name, r.borrow_date, r.due_date,
+                     r.returned_date, r.status
+              FROM borrow_records r
+              JOIN books b ON b.id = r.book_id
+              WHERE r.status='requested'
+              ORDER BY r.id DESC"""
+    cur.execute(sql)
+    data = rows(cur)
+    cur.close(); conn.close()
+    for d in data:
+        for k in ("borrow_date", "due_date", "returned_date"):
+            if d.get(k) is not None:
+                d[k] = str(d[k])
+    return jsonify(data)
 
 
 @app.route("/api/records/<int:record_id>/approve", methods=["POST"])
@@ -798,7 +967,10 @@ def approve_request(record_id):
         if available_copies <= 1:
             msg = f"Staff has rejected your borrow request for \"{book_title}\" because only one copy is available. Please read it in the library; it is not available to borrow."
             cur.execute("UPDATE borrow_records SET status='rejected' WHERE id=%s", (record_id,))
-            cur.execute("INSERT INTO notifications (user_id, message) VALUES (%s, %s)", (user_id, msg))
+            cur.execute(
+                "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id) VALUES (%s, %s, %s, %s, %s, %s)",
+                (user_id, 'user', f"Request Rejected: {book_title}", msg, 'OTHER', record_id)
+            )
             conn.commit()
             return jsonify({"message":"Request auto-rejected (single copy)", "record_id":record_id, "reason": msg}), 200
         borrow_date = date.today()
@@ -806,7 +978,10 @@ def approve_request(record_id):
         cur.execute("UPDATE borrow_records SET status='borrowed', borrow_date=%s, due_date=%s WHERE id=%s", (borrow_date, due_date, record_id))
         cur.execute("UPDATE books SET available_copies = available_copies - 1 WHERE id=%s", (book_id,))
         msg = f"Staff has approved your borrow request for \"{book_title}\". Please collect the book and return by {str(due_date)}."
-        cur.execute("INSERT INTO notifications (user_id, message) VALUES (%s, %s)", (user_id, msg))
+        cur.execute(
+            "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id) VALUES (%s, %s, %s, %s, %s, %s)",
+            (user_id, 'user', f"Request Approved: {book_title}", msg, 'OTHER', record_id)
+        )
         conn.commit()
         return jsonify({"message":"Request approved", "record_id":record_id})
     except Exception as e:
@@ -836,7 +1011,10 @@ def reject_request(record_id):
         book_title = br[0] if br else "requested book"
         cur.execute("UPDATE borrow_records SET status='rejected' WHERE id=%s", (record_id,))
         msg = f"Your borrow request for \"{book_title}\" has been rejected by staff."
-        cur.execute("INSERT INTO notifications (user_id, message) VALUES (%s, %s)", (user_id, msg))
+        cur.execute(
+            "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id) VALUES (%s, %s, %s, %s, %s, %s)",
+            (user_id, 'user', f"Request Rejected: {book_title}", msg, 'OTHER', record_id)
+        )
         conn.commit()
         return jsonify({"message":"Request rejected", "record_id":record_id})
     except Exception as e:
@@ -856,30 +1034,87 @@ def get_notifications():
     auth = get_auth()
     if not auth:
         return jsonify({"error":"Unauthorized"}),401
+    
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT id, COALESCE(message, '') AS message, is_read, updated_at FROM notifications WHERE user_id=%s ORDER BY updated_at DESC LIMIT 50", (auth["id"],))
-    data = rows(cur)
-    if auth["role"] in ("admin", "staff"):
+    
+    # Mark any past-due borrowed records as overdue (if not already marked)
+    try:
         cur.execute(
-            "SELECT r.id, b.title, u.username, r.due_date "
-            "FROM borrow_records r "
+            "SELECT r.id, r.user_id, b.title, r.due_date FROM borrow_records r "
             "JOIN books b ON b.id = r.book_id "
-            "JOIN users u ON u.id = r.user_id "
-            "WHERE r.status = 'borrowed' AND r.due_date < %s "
-            "ORDER BY r.due_date ASC LIMIT 10",
+            "WHERE r.status = 'borrowed' AND r.due_date < %s",
             (date.today(),)
         )
         overdue_rows = cur.fetchall()
-        for overdue in overdue_rows:
-            due_date = overdue[3]
-            late_days = (date.today() - due_date).days
-            late_text = f"{late_days} day{'s' if late_days != 1 else ''} late"
-            data.insert(0, {
-                "id": f"overdue-{overdue[0]}",
-                "message": f"Overdue: {overdue[2]} has '{overdue[1]}' due {due_date} ({late_text})",
-                "is_read": 0,
-                    "updated_at": str(due_date),
-            })
+        for orow in overdue_rows:
+            rec_id, uid, title, due_date = orow
+            try:
+                # Check if we already have an OVERDUE_BOOK notification for this record
+                cur.execute("SELECT id FROM notifications WHERE type='OVERDUE_BOOK' AND related_id=%s", (rec_id,))
+                if not cur.fetchone():
+                    # Mark as overdue
+                    cur.execute("UPDATE borrow_records SET status='overdue' WHERE id=%s", (rec_id,))
+                    
+                    # Create notification for the user who borrowed it
+                    late_days = (date.today() - due_date).days
+                    msg = f"Your borrow '{title}' is {late_days} day{'s' if late_days != 1 else ''} late. Please return it."
+                    cur.execute(
+                        "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id) "
+                        "VALUES (%s, %s, %s, %s, %s, %s)",
+                        (uid, 'user', f"Overdue: {title}", msg, 'OVERDUE_BOOK', rec_id)
+                    )
+                    
+                    # Create notification for admin about the overdue
+                    cur.execute("SELECT username FROM users WHERE id=%s", (uid,))
+                    user_row = cur.fetchone()
+                    borrower_name = user_row[0] if user_row else "Unknown"
+                    admin_msg = f"{borrower_name} has overdue book: {title}, due on {due_date}"
+                    
+                    cur.execute("SELECT id FROM users WHERE role='admin'")
+                    admin_users = cur.fetchall()
+                    for admin_row in admin_users:
+                        admin_id = admin_row[0]
+                        cur.execute(
+                            "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id) "
+                            "VALUES (%s, %s, %s, %s, %s, %s)",
+                            (admin_id, 'admin', f"Overdue: {title}", admin_msg, 'OVERDUE_BOOK', rec_id)
+                        )
+            except Exception as e:
+                # ignore per-record errors and continue
+                conn.rollback()
+                continue
+        
+        if overdue_rows:
+            conn.commit()
+    except Exception:
+        # best-effort only; don't block notifications retrieval
+        conn.rollback()
+    
+    # Get notifications based on user role
+    if auth["role"] == "user":
+        # Users see only their own notifications
+        cur.execute(
+            "SELECT id, title, message, type, is_read, created_at FROM notifications "
+            "WHERE user_id=%s ORDER BY created_at DESC LIMIT 50",
+            (auth["id"],)
+        )
+    elif auth["role"] == "staff":
+        # Staff see BORROW_REQUEST notifications (for their role)
+        cur.execute(
+            "SELECT id, title, message, type, is_read, created_at FROM notifications "
+            "WHERE recipient_role='staff' AND type='BORROW_REQUEST' ORDER BY created_at DESC LIMIT 50"
+        )
+    elif auth["role"] == "admin":
+        # Admin see USER_REGISTRATION and OVERDUE_BOOK notifications (for their role)
+        cur.execute(
+            "SELECT id, title, message, type, is_read, created_at FROM notifications "
+            "WHERE (recipient_role='admin') AND (type='USER_REGISTRATION' OR type='OVERDUE_BOOK') "
+            "ORDER BY created_at DESC LIMIT 50"
+        )
+    else:
+        return jsonify({"error":"Invalid role"}),400
+    
+    data = rows(cur)
     cur.close(); conn.close()
     return jsonify(data)
 
@@ -887,15 +1122,202 @@ def get_notifications():
 @app.route("/api/notifications/overdue-count", methods=["GET"])
 def overdue_count():
     auth = get_auth()
-    if not auth or auth["role"] not in ("admin","staff"):
-        return jsonify({"error":"Forbidden"}),403
+    if not auth:
+        return jsonify({"error":"Unauthorized"}),401
+    
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM borrow_records WHERE status='borrowed' AND due_date < %s", (date.today(),))
-    cnt = cur.fetchone()[0]
+    
+    if auth["role"] == "admin":
+        # Admin sees unread OVERDUE_BOOK notifications
+        cur.execute(
+            "SELECT COUNT(*) FROM notifications WHERE recipient_role='admin' AND type='OVERDUE_BOOK' AND is_read=0"
+        )
+        cnt = cur.fetchone()[0]
+    elif auth["role"] == "staff":
+        # Staff sees unread BORROW_REQUEST notifications
+        cur.execute(
+            "SELECT COUNT(*) FROM notifications WHERE recipient_role='staff' AND type='BORROW_REQUEST' AND is_read=0"
+        )
+        cnt = cur.fetchone()[0]
+    elif auth["role"] == "user":
+        # Users see unread notifications (all types)
+        cur.execute(
+            "SELECT COUNT(*) FROM notifications WHERE user_id=%s AND is_read=0",
+            (auth["id"],)
+        )
+        cnt = cur.fetchone()[0]
+    else:
+        cnt = 0
+    
     cur.close(); conn.close()
     return jsonify({"count": cnt})
 
 
-if __name__ == "__main__":
+@app.route("/api/profile", methods=["GET"])
+def get_profile():
+    """Get current logged-in user profile (works for all roles)"""
+    auth = get_auth()
+    if not auth:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, username, email, phone, role, status, profile_photo, permanent_address, temporary_address FROM users WHERE id=%s",
+            (auth["id"],)
+        )
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "User not found"}), 404
+        
+        cols = ["id", "username", "email", "phone", "role", "status", "profile_photo", "permanent_address", "temporary_address"]
+        profile = dict(zip(cols, row))
+        profile["profile_photo"] = build_photo_url(profile.get("profile_photo"))
+        
+        cur.close(); conn.close()
+        return jsonify(profile)
+    except Exception as e:
+        cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
 
-    app.run(host="0.0.0.0", port=5000, debug=True)
+
+@app.route("/api/profile", methods=["PATCH"])
+def update_profile():
+    """Update current logged-in user profile"""
+    auth = get_auth()
+    if not auth:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    payload = request.get_json() or {}
+    
+    # Allowed fields to update
+    updates = {}
+    fields = {
+        "username": str,
+        "email": str,
+        "phone": str,
+        "permanent_address": str,
+        "temporary_address": str,
+        "password": str,
+    }
+    
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        # Get current user
+        cur.execute("SELECT id, username, email, phone FROM users WHERE id=%s", (auth["id"],))
+        current = cur.fetchone()
+        if not current:
+            return jsonify({"error": "User not found"}), 404
+        
+        current_id, current_username, current_email, current_phone = current
+        
+        # Build updates
+        for field, field_type in fields.items():
+            if field in payload and payload[field] is not None:
+                value = str(payload[field]).strip() if field != "password" else payload[field]
+                if value:
+                    updates[field] = value
+        
+        if not updates:
+            cur.close(); conn.close()
+            return jsonify({"error": "No updates provided"}), 400
+        
+        # Validate phone format
+        if "phone" in updates:
+            phone_digits = ''.join(c for c in updates["phone"] if c.isdigit())
+            if len(phone_digits) != 10:
+                cur.close(); conn.close()
+                return jsonify({"error": "Enter valid number"}), 400
+        
+        # Check for duplicate email/phone (only if changed)
+        if "email" in updates and updates["email"] != current_email:
+            cur.execute("SELECT id FROM users WHERE email=%s", (updates["email"],))
+            if cur.fetchone():
+                cur.close(); conn.close()
+                return jsonify({"error": "Email already in use"}), 400
+        
+        if "phone" in updates and updates["phone"] != current_phone:
+            cur.execute("SELECT id FROM users WHERE phone=%s", (updates["phone"],))
+            if cur.fetchone():
+                cur.close(); conn.close()
+                return jsonify({"error": "Phone already in use"}), 400
+        
+        # Hash password if provided
+        if "password" in updates:
+            updates["password"] = generate_password_hash(updates["password"])
+        
+        # Build SQL update
+        set_clause = ", ".join([f"{k}=%s" for k in updates.keys()])
+        sql = f"UPDATE users SET {set_clause} WHERE id=%s"
+        values = list(updates.values()) + [auth["id"]]
+        
+        cur.execute(sql, tuple(values))
+        conn.commit()
+        
+        # Return updated profile
+        cur.execute(
+            "SELECT id, username, email, phone, role, status, profile_photo, permanent_address, temporary_address FROM users WHERE id=%s",
+            (auth["id"],)
+        )
+        row = cur.fetchone()
+        cols = ["id", "username", "email", "phone", "role", "status", "profile_photo", "permanent_address", "temporary_address"]
+        profile = dict(zip(cols, row))
+        profile["profile_photo"] = build_photo_url(profile.get("profile_photo"))
+        
+        cur.close(); conn.close()
+        return jsonify({"message": "Profile updated", "profile": profile})
+    except Exception as e:
+        conn.rollback()
+        cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/notifications/<int:notification_id>/read", methods=["POST"])
+def mark_notification_read(notification_id):
+    """Mark a single notification as read"""
+    auth = get_auth()
+    if not auth:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        # Verify notification belongs to current user
+        cur.execute("SELECT user_id FROM notifications WHERE id=%s", (notification_id,))
+        row = cur.fetchone()
+        if not row or row[0] != auth["id"]:
+            cur.close(); conn.close()
+            return jsonify({"error": "Not found"}), 404
+        
+        cur.execute("UPDATE notifications SET is_read=1 WHERE id=%s", (notification_id,))
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"message": "Marked as read"})
+    except Exception as e:
+        conn.rollback()
+        cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/notifications/mark-all-read", methods=["POST"])
+def mark_all_notifications_read():
+    """Mark all notifications as read for current user"""
+    auth = get_auth()
+    if not auth:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("UPDATE notifications SET is_read=1 WHERE user_id=%s AND is_read=0", (auth["id"],))
+        updated = cur.rowcount
+        conn.commit()
+        cur.close(); conn.close()
+        return jsonify({"message": "All marked as read", "count": updated})
+    except Exception as e:
+        conn.rollback()
+        cur.close(); conn.close()
+        return jsonify({"error": str(e)}), 500
+
+
+if __name__ == "__main__":
+    debug_mode = os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1", "yes")
+    app.run(host="0.0.0.0", port=5000, debug=debug_mode)

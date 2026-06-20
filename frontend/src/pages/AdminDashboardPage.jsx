@@ -7,13 +7,14 @@ import {
   Title,
   Tooltip,
   Legend,
+  ArcElement,
 } from 'chart.js';
-import { Bar } from 'react-chartjs-2';
+import { Bar, Pie } from 'react-chartjs-2';
 import { api } from "../api";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateShort } from "../utils/date";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
 
 export default function AdminDashboardPage() {
   const [data, setData] = useState(null);
@@ -26,7 +27,7 @@ export default function AdminDashboardPage() {
   if (error) {
     return (
       <div className="card page-card">
-        <PageHeader title="Dashboard" subtitle="High level activity and overdue insights" />
+        <PageHeader title="Dashboard" />
         <p className="error">{error}</p>
       </div>
     );
@@ -35,7 +36,7 @@ export default function AdminDashboardPage() {
   if (!data) {
     return (
       <div className="card page-card">
-        <PageHeader title="Dashboard" subtitle="High level activity and overdue insights" />
+        <PageHeader title="Dashboard" />
         <p className="notice">Loading dashboard data...</p>
       </div>
     );
@@ -68,11 +69,87 @@ export default function AdminDashboardPage() {
     },
   };
 
+  // Borrower statistics charts
+  const borrowerLabels = (data.borrower_stats || []).map((b) => b.name);
+  const borrowerCounts = (data.borrower_stats || []).map((b) => b.count);
+  
+  const borrowerBarChartData = {
+    labels: borrowerLabels,
+    datasets: [
+      {
+        label: 'Books Borrowed',
+        data: borrowerCounts,
+        backgroundColor: [
+          'rgba(67,56,202,0.8)',
+          'rgba(99,102,241,0.8)',
+          'rgba(139,92,246,0.8)',
+          'rgba(168,85,247,0.8)',
+          'rgba(190,24,93,0.8)',
+        ],
+        borderRadius: 10,
+      },
+    ],
+  };
+
+  const borrowerBarChartOptions = {
+    indexAxis: 'y',
+    responsive: true,
+    maintainAspectRatio: true,
+    plugins: {
+      legend: { display: false },
+      tooltip: { enabled: true },
+      title: { display: false },
+    },
+    scales: {
+      x: { beginAtZero: true, ticks: { font: { size: 11 } } },
+      y: { ticks: { font: { size: 11 } } },
+    },
+  };
+
+  const colors = [
+    'rgba(67,56,202,0.8)',
+    'rgba(99,102,241,0.8)',
+    'rgba(139,92,246,0.8)',
+    'rgba(168,85,247,0.8)',
+    'rgba(190,24,93,0.8)',
+    'rgba(244,63,94,0.8)',
+    'rgba(249,115,22,0.8)',
+    'rgba(251,146,60,0.8)',
+    'rgba(34,197,94,0.8)',
+    'rgba(59,130,246,0.8)',
+  ];
+
+  const borrowerPieChartData = {
+    labels: borrowerLabels,
+    datasets: [
+      {
+        label: 'Books Borrowed',
+        data: borrowerCounts,
+        backgroundColor: colors.slice(0, borrowerLabels.length),
+        borderWidth: 2,
+        borderColor: '#fff',
+      },
+    ],
+  };
+
+  const borrowerPieChartOptions = {
+    responsive: true,
+    maintainAspectRatio: true,
+    plugins: {
+      legend: {
+        display: true,
+        position: 'bottom',
+        labels: { font: { size: 11 }, padding: 15 },
+      },
+      tooltip: { enabled: true },
+      title: { display: false },
+    },
+  };
+
   return (
-    <div className="page-card">
+    <div className="page-card admin-page-card">
       <PageHeader
         title="Admin Dashboard"
-        subtitle="Clear activity, overdue alerts, and system summaries in one place."
       />
 
       <div className="dashboard-grid">
@@ -129,14 +206,30 @@ export default function AdminDashboardPage() {
         <div className="dashboard-panel">
           <div className="section-card chart-card">
             <div className="section-card-header">
-              <h3>Activity</h3>
-              <span className="section-note">Last 7 days</span>
+              <h3>Borrower Statistics</h3>
+              <span className="section-note">Books borrowed by borrower</span>
             </div>
-            {data.activity.length === 0 ? (
-              <p className="empty">No recent activity.</p>
+            {(data.borrower_stats || []).length === 0 ? (
+              <p className="empty">No borrower data.</p>
             ) : (
               <div className="chart-container">
-                <Bar data={chartData} options={chartOptions} />
+                <Bar data={borrowerBarChartData} options={borrowerBarChartOptions} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="dashboard-panel">
+          <div className="section-card chart-card">
+            <div className="section-card-header">
+              <h3>Borrower Distribution</h3>
+              <span className="section-note">Pie chart view</span>
+            </div>
+            {(data.borrower_stats || []).length === 0 ? (
+              <p className="empty">No borrower data.</p>
+            ) : (
+              <div className="chart-container">
+                <Pie data={borrowerPieChartData} options={borrowerPieChartOptions} />
               </div>
             )}
           </div>

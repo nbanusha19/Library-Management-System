@@ -2,28 +2,21 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { PageHeader } from "../components/PageHeader";
 import { formatDateShort } from "../utils/date";
-
-function groupRecordsByBorrower(records) {
-  const groups = {};
-  records.forEach((record) => {
-    const key = `${record.user_id}-${record.borrower_name}`;
-    if (!groups[key]) {
-      groups[key] = { borrower_name: record.borrower_name, books: [] };
-    }
-    groups[key].books.push(record);
-  });
-  return Object.values(groups);
-}
+import { useAuth } from "../hooks/useAuth";
 
 export default function BorrowedPage({ mode }) {
   const [records, setRecords] = useState([]);
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
 
   useEffect(() => {
+    setLoading(true);
     const loader = mode === "active" ? api.active() : api.history();
     loader
       .then(setRecords)
-      .catch((e) => setMessage(e.message));
+      .catch((e) => setMessage(e.message))
+      .finally(() => setLoading(false));
   }, [mode]);
 
   const ret = async (id) => {
@@ -37,58 +30,166 @@ export default function BorrowedPage({ mode }) {
     }
   };
 
-  const grouped = groupRecordsByBorrower(records);
-
-  const badge = (book) => {
-    if (book.status === "requested") return <span className="badge pending">Pending Approval</span>;
-    if (book.status === "borrowed") return <span className="badge borrowed">Borrowed</span>;
-    return <span className="badge returned">Returned</span>;
+  // Calculate status for each record
+  const getRecordStatus = (record) => {
+    if (mode === "history") return null;
+    
+    if (record.returned_date) return "returned";
+    if (!record.due_date) return "borrowed";
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDate = new Date(record.due_date);
+    dueDate.setHours(0, 0, 0, 0);
+    
+    if (today > dueDate) {
+      const daysOverdue = Math.floor((today - dueDate) / (1000 * 60 * 60 * 24));
+      return { type: "overdue", days: daysOverdue };
+    }
+    return "borrowed";
   };
 
+  const getStatusBadge = (status) => {
+    if (status === "borrowed") {
+      return <span className="status-badge status-borrowed">BORROWED</span>;
+    }
+    if (status === "returned") {
+      return <span className="status-badge status-returned">RETURNED</span>;
+    }
+    if (status && typeof status === "object" && status.type === "overdue") {
+      return (
+        <span className="status-badge status-overdue">
+          OVERDUE ({status.days} days)
+        </span>
+      );
+    }
+    return <span className="status-badge status-default">{status}</span>;
+  };
+
+  const overdueCount = mode === "active" 
+    ? records.filter(r => {
+        const status = getRecordStatus(r);
+        return status && typeof status === "object" && status.type === "overdue";
+      }).length
+    : 0;
+
   return (
-    <div className="page-card">
+    <div className="page-card borrowed-page-card">
       <PageHeader
-        title={mode === "active" ? "Currently Borrowed" : "Return History"}
-        subtitle={mode === "active" ? "Active loans with return controls." : "Completed borrows and history."}
+        title={mode === "active" ? "📚 Currently Borrowed" : "📖 Return History"}
       />
 
-      {message && <p className="notice">{message}</p>}
+      {message && <div className="alert alert-info">{message}</div>}
 
-      {grouped.length === 0 ? (
-        <p className="empty">No records available.</p>
+      {loading ? (
+        <div className="loading-container">
+          <div className="spinner"></div>
+          <p>Loading records...</p>
+        </div>
+      ) : records.length === 0 ? (
+        <div className="empty-state">
+          <p className="empty-icon">📚</p>
+          <p className="empty-title">No records available</p>
+          <p className="empty-hint">
+            {mode === "active" ? "You haven't borrowed any books yet." : "Your return history is empty."}
+          </p>
+        </div>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Borrower</th>
-              <th>Book</th>
-              <th>Borrowed</th>
-              <th>Due</th>
-              {mode === "history" ? <th>Returned</th> : <th>Status</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {grouped.map((group) =>
-              group.books.map((book, index) => (
-                <tr key={book.id}>
-                  {index === 0 && <td rowSpan={group.books.length}>{group.borrower_name}</td>}
-                  <td>
-                    <div className="book-group-item">
-                      <strong>{book.title}</strong>
-                      {mode === "active" && book.status === "borrowed" && (
-                        <button className="button-return" onClick={() => ret(book.id)}>Return</button>
-                      )}
-                    </div>
-                  </td>
-                  <td>{formatDateShort(book.borrow_date)}</td>
-                  <td>{formatDateShort(book.due_date)}</td>
-                  {mode === "history" ? <td>{formatDateShort(book.returned_date)}</td> : <td>{badge(book)}</td>}
-                </tr>
-              ))
+        <>
+          <div className="records-summary">
+            Total: <strong>{records.length}</strong> book{records.length !== 1 ? "s" : ""}
+            {mode === "active" && overdueCount > 0 && (
+              <span className="overdue-count">
+                • <strong>{overdueCount}</strong> overdue
+              </span>
             )}
-          </tbody>
-        </table>
+          </div>
+
+          <div className="borrowed-table-wrapper">
+            <table className="borrowed-table">
+              <thead className="table-header-sticky">
+                <tr>
+                  {user?.role === "user" ? (
+                    <th className="col-serial">Serial No.</th>
+                  ) : (
+                    <th className="col-borrower">Borrower Name</th>
+                  )}
+                  <th className="col-book">Book Title</th>
+                  <th className="col-dates">Borrowed</th>
+                  <th className="col-dates">Due Date</th>
+                  {mode === "history" ? (
+                    <th className="col-dates">Returned</th>
+                  ) : (
+                    <th className="col-status">Status</th>
+                  )}
+                  {mode === "active" && user?.role === "user" && (
+                    <th className="col-actions">Action</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((record, index) => {
+                  const status = getRecordStatus(record);
+                  const isOverdue = status && typeof status === "object" && status.type === "overdue";
+                  return (
+                    <tr 
+                      key={record.id} 
+                      className={`table-row ${isOverdue ? "overdue" : ""}`}
+                    >
+                      {user?.role === "user" ? (
+                        <td className="col-serial">
+                          <span className="serial-number">{index + 1}</span>
+                        </td>
+                      ) : (
+                        <td className="col-borrower">
+                          <span className="borrower-name">{record.borrower_name}</span>
+                        </td>
+                      )}
+                      <td className="col-book">
+                        <span className="book-title">{record.title}</span>
+                      </td>
+                      <td className="col-dates">
+                        <span className="date-badge">{formatDateShort(record.borrow_date)}</span>
+                      </td>
+                      <td className="col-dates">
+                        <span className={`date-badge ${isOverdue ? "overdue" : ""}`}>
+                          {formatDateShort(record.due_date)}
+                        </span>
+                      </td>
+                      {mode === "history" ? (
+                        <td className="col-dates">
+                          <span className="date-badge">{formatDateShort(record.returned_date)}</span>
+                        </td>
+                      ) : (
+                        <td className="col-status">
+                          {getStatusBadge(status)}
+                        </td>
+                      )}
+                      {mode === "active" && user?.role === "user" && (
+                        <td className="col-actions">
+                          {!record.returned_date && (
+                            <button 
+                              className="btn-return"
+                              onClick={() => ret(record.id)}
+                              title="Return this book"
+                            >
+                              ↩ Return
+                            </button>
+                          )}
+                          {record.returned_date && (
+                            <span className="action-none">—</span>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
 }
+

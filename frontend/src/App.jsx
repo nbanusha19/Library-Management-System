@@ -8,6 +8,9 @@ import OverduePage from "./pages/OverduePage";
 import BorrowedPage from "./pages/BorrowedPage";
 import RequestsPage from "./pages/RequestsPage";
 import { LoginPage, RegisterPage } from "./pages/AuthPage";
+import ProfilePopup from "./components/ProfilePopup";
+import ProfileModal from "./components/ProfileModal";
+import NotificationBell from "./components/NotificationBell";
 
 const USER_TABS = [
   { key: "books", label: "Browse Books" },
@@ -27,7 +30,8 @@ const ADMIN_TABS = [
 const STAFF_TABS = [
   { key: "dashboard", label: "Dashboard" },
   { key: "books", label: "Books" },
-  { key: "requests", label: "Requests" },
+  { key: "users", label: "Users" },
+  { key: "requests", label: "Borrow Requests" },
   { key: "borrowed", label: "Borrowed Books" },
   { key: "overdue", label: "Overdue" },
   { key: "returned", label: "Returned Books" },
@@ -39,9 +43,8 @@ export default function App() {
   const [mode, setMode] = useState("login");
   const [message, setMessage] = useState("");
   const { toasts, showToast, removeToast } = useToast();
-  const [overdueCount, setOverdueCount] = useState(0);
-  const [notifications, setNotifications] = useState([]);
-  const [showNotifications, setShowNotifications] = useState(false);
+  const [showProfilePopup, setShowProfilePopup] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem("lms_theme") === "dark");
 
   useEffect(() => {
@@ -53,9 +56,6 @@ export default function App() {
           setUser(merged);
           setMode(merged.role);
           setTab(merged.role === "admin" || merged.role === "staff" ? "dashboard" : "books");
-          if (merged.role === "admin" || merged.role === "staff") {
-            api.overdueCount().then((d) => setOverdueCount(d.count)).catch(() => {});
-          }
         })
         .catch(() => {
           localStorage.removeItem("lms_auth");
@@ -68,13 +68,6 @@ export default function App() {
     document.body.classList.toggle("dark", darkMode);
     localStorage.setItem("lms_theme", darkMode ? "dark" : "light");
   }, [darkMode]);
-
-  const toggleNotifications = () => {
-    setShowNotifications((prev) => !prev);
-    if (!showNotifications) {
-      api.notifications().then(setNotifications).catch(() => {});
-    }
-  };
 
   const doLogout = () => {
     localStorage.removeItem("lms_auth");
@@ -90,9 +83,14 @@ export default function App() {
     setMode(authUser.role);
     setTab(authUser.role === "admin" || authUser.role === "staff" ? "dashboard" : "books");
     setMessage("");
-    if (authUser.role === "admin" || authUser.role === "staff") {
-      api.overdueCount().then((d) => setOverdueCount(d.count)).catch(() => {});
-    }
+  };
+
+  const handleProfileUpdate = (updatedProfile) => {
+    const updated = { ...user, ...updatedProfile };
+    setUser(updated);
+    // Update localStorage
+    localStorage.setItem("lms_auth", JSON.stringify(updated));
+    setShowProfilePopup(false);
   };
 
   const handleRegisterSuccess = (msg) => {
@@ -113,7 +111,7 @@ export default function App() {
       return (
         <>
           {tab === "dashboard" && <AdminDashboardPage />}
-          {tab === "books" && <BooksPage canBorrow={false} />}
+          {tab === "books" && <BooksPage canBorrow={false} showToast={showToast} />}
           {tab === "users" && <UsersPage showToast={showToast} />}
           {tab === "borrowed" && <BorrowedPage mode="active" />}
           {tab === "overdue" && <OverduePage />}
@@ -126,7 +124,8 @@ export default function App() {
       return (
         <>
           {tab === "dashboard" && <AdminDashboardPage />}
-          {tab === "books" && <BooksPage canBorrow={false} />}
+          {tab === "books" && <BooksPage canBorrow={false} showToast={showToast} />}
+          {tab === "users" && <UsersPage showToast={showToast} isStaff={true} />}
           {tab === "requests" && <RequestsPage showToast={showToast} />}
           {tab === "borrowed" && <BorrowedPage mode="active" />}
           {tab === "overdue" && <OverduePage />}
@@ -137,7 +136,7 @@ export default function App() {
 
     return (
       <>
-        {tab === "books" && <BooksPage />}
+        {tab === "books" && <BooksPage showToast={showToast} />}
         {tab === "active" && <BorrowedPage mode="active" />}
         {tab === "history" && <BorrowedPage mode="history" />}
       </>
@@ -155,34 +154,21 @@ export default function App() {
 
           {user ? (
             <div className="user-panel">
-              <div className="user-avatar">
-                {user.profile_photo ? <img src={user.profile_photo} alt={user.username} /> : <span>👤</span>}
-              </div>
-              <div className="user-info">
-                <strong>{user.username}</strong>
-                <small>{user.email}</small>
-              </div>
+              <button 
+                className="user-avatar-btn"
+                onClick={() => setShowProfilePopup(true)}
+                title="Click to view profile"
+              >
+                <div className="user-avatar">
+                  {user.profile_photo ? <img src={user.profile_photo} alt={user.username} /> : <span>👤</span>}
+                </div>
+                <div className="user-info">
+                  <strong>{user.username}</strong>
+                  <small>{user.email}</small>
+                </div>
+              </button>
               <div className="notifications">
-                <button className="bell" onClick={toggleNotifications}>
-                  🔔
-                  {(user.role === "admin" || user.role === "staff")
-                    ? overdueCount > 0 && <span className="count">{overdueCount}</span>
-                    : notifications.length > 0 && <span className="count">{notifications.length}</span>}
-                </button>
-                {showNotifications && (
-                  <div className="notif-dropdown card">
-                    <h4>Notifications</h4>
-                    {notifications.length === 0 ? (
-                      <p className="empty">No notifications</p>
-                    ) : (
-                      <ul>
-                        {notifications.map((n) => (
-                          <li key={n.id}>{n.message || "No message"} <small>{n.updated_at}</small></li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
+                <NotificationBell />
               </div>
               <button onClick={() => setDarkMode((d) => !d)}>{darkMode ? "🌙" : "☀️"}</button>
               <button className="danger" onClick={doLogout}>Logout</button>
@@ -213,6 +199,16 @@ export default function App() {
       <main className="main-content">
         {renderPage()}
       </main>
+
+      {/* Profile Popup */}
+      {showProfilePopup && user && (
+        <ProfilePopup 
+          user={user}
+          onClose={() => setShowProfilePopup(false)}
+          showToast={showToast}
+          onProfileUpdate={handleProfileUpdate}
+        />
+      )}
     </>
   );
 }

@@ -50,7 +50,7 @@ CREATE TABLE borrow_records (
     borrow_date DATE DEFAULT NULL,
     due_date DATE DEFAULT NULL,
     returned_date DATE DEFAULT NULL,
-    status ENUM('requested','borrowed','returned') NOT NULL DEFAULT 'borrowed',
+    status ENUM('requested','borrowed','returned','overdue','rejected') NOT NULL DEFAULT 'borrowed',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -63,11 +63,19 @@ CREATE TABLE borrow_records (
 CREATE TABLE notifications (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
-    message VARCHAR(255) NOT NULL,
+    recipient_role ENUM('user','staff','admin') DEFAULT NULL,
+    title VARCHAR(255) NOT NULL DEFAULT 'Notification',
+    message VARCHAR(500) NOT NULL,
+    type ENUM('BORROW_REQUEST','USER_REGISTRATION','OVERDUE_BOOK','OTHER') DEFAULT 'OTHER',
+    related_id INT DEFAULT NULL,
     is_read TINYINT(1) NOT NULL DEFAULT 0,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_notifications_user (user_id)
+    INDEX idx_notifications_user (user_id),
+    INDEX idx_notifications_role (recipient_role),
+    INDEX idx_notifications_type (type),
+    INDEX idx_notifications_read (is_read)
 );
 
 

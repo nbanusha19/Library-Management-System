@@ -6,6 +6,7 @@ export function LoginPage({ onLogin, message, showToast }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const submit = async () => {
     setError("");
@@ -15,13 +16,25 @@ export function LoginPage({ onLogin, message, showToast }) {
       showToast(msg, "warning");
       return;
     }
+    
+    setLoading(true);
     try {
       const res = await api.login(username.trim(), password.trim());
       showToast(`Welcome, ${res.user.username}!`, "success");
       onLogin(res.user);
     } catch (e) {
-      setError(e.message);
-      showToast(e.message, "error");
+      const errorMsg = e.message || "Failed to log in. Please try again.";
+      setError(errorMsg);
+      showToast(errorMsg, "error");
+      console.error("[Login Error]", errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter" && !loading) {
+      submit();
     }
   };
 
@@ -32,13 +45,28 @@ export function LoginPage({ onLogin, message, showToast }) {
       {error && <p className="error">{error}</p>}
       <div className="form-group">
         <label>Username</label>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input 
+          value={username} 
+          onChange={(e) => setUsername(e.target.value)}
+          onKeyPress={handleKeyPress}
+          disabled={loading}
+          placeholder="Enter your username"
+        />
       </div>
       <div className="form-group">
         <label>Password</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <input 
+          type="password" 
+          value={password} 
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyPress={handleKeyPress}
+          disabled={loading}
+          placeholder="Enter your password"
+        />
       </div>
-      <button className="primary" onClick={submit}>Login</button>
+      <button className="primary" onClick={submit} disabled={loading}>
+        {loading ? "Logging in..." : "Login"}
+      </button>
     </div>
   );
 }
@@ -53,6 +81,7 @@ export function RegisterPage({ onRegister, message, showToast }) {
   const [photoFile, setPhotoFile] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const submit = async () => {
     setError("");
@@ -66,12 +95,13 @@ export function RegisterPage({ onRegister, message, showToast }) {
 
     const phoneDigits = phone.trim().replace(/\D/g, "");
     if (phoneDigits.length !== 10) {
-      const msg = "Enter valid number";
+      const msg = "Phone number must be 10 digits.";
       setError(msg);
       showToast(msg, "warning");
       return;
     }
 
+    setLoading(true);
     try {
       const res = await api.register(
         username.trim(),
@@ -86,8 +116,12 @@ export function RegisterPage({ onRegister, message, showToast }) {
       showToast("Registration successful! Your account is approved.", "success");
       onRegister(res.message);
     } catch (e) {
-      setError(e.message);
-      showToast(e.message, "error");
+      const errorMsg = e.message || "Registration failed. Please try again.";
+      setError(errorMsg);
+      showToast(errorMsg, "error");
+      console.error("[Registration Error]", errorMsg);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -99,33 +133,74 @@ export function RegisterPage({ onRegister, message, showToast }) {
       {error && <p className="error">{error}</p>}
       <div className="form-group">
         <label>Username</label>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input 
+          value={username} 
+          onChange={(e) => setUsername(e.target.value)}
+          disabled={loading}
+          placeholder="Choose a username"
+        />
       </div>
       <div className="form-group">
         <label>Email</label>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input 
+          type="email" 
+          value={email} 
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={loading}
+          placeholder="your@email.com"
+        />
       </div>
       <div className="form-group">
         <label>Phone</label>
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} />
+        <input 
+          value={phone} 
+          onChange={(e) => setPhone(e.target.value)}
+          disabled={loading}
+          placeholder="10-digit phone number"
+        />
       </div>
       <div className="form-group">
         <label>Permanent Address</label>
-        <textarea value={permanentAddress} onChange={(e) => setPermanentAddress(e.target.value)} rows={3} />
+        <textarea 
+          value={permanentAddress} 
+          onChange={(e) => setPermanentAddress(e.target.value)}
+          disabled={loading}
+          rows={3}
+          placeholder="Enter your permanent address"
+        />
       </div>
       <div className="form-group">
         <label>Temporary Address</label>
-        <textarea value={temporaryAddress} onChange={(e) => setTemporaryAddress(e.target.value)} rows={2} />
+        <textarea 
+          value={temporaryAddress} 
+          onChange={(e) => setTemporaryAddress(e.target.value)}
+          disabled={loading}
+          rows={2}
+          placeholder="Enter your temporary address"
+        />
       </div>
       <div className="form-group">
-        <label>Profile Photo</label>
-        <input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files?.[0] || null)} />
+        <label>Profile Photo (Optional)</label>
+        <input 
+          type="file" 
+          accept="image/*" 
+          onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+          disabled={loading}
+        />
       </div>
       <div className="form-group">
         <label>Password</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <input 
+          type="password" 
+          value={password} 
+          onChange={(e) => setPassword(e.target.value)}
+          disabled={loading}
+          placeholder="Minimum 6 characters"
+        />
       </div>
-      <button className="primary" onClick={submit}>Register</button>
+      <button className="primary" onClick={submit} disabled={loading}>
+        {loading ? "Registering..." : "Register"}
+      </button>
     </div>
   );
 }
