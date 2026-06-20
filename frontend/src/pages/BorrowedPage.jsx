@@ -160,7 +160,7 @@ export default function BorrowedPage({ mode }) {
                         <span className="book-title">{record.title}</span>
                       </td>
                       <td className="col-dates">
-                        <span className="date-badge">{formatDateShort(record.borrow_date)}</span>
+                        <span className="date-badge">{formatDateShort(record.borrow_date || record.borrowed_date)}</span>
                       </td>
                       <td className="col-dates">
                         <span className={`date-badge ${isOverdue ? "overdue" : ""}`}>

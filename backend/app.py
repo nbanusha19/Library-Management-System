@@ -720,44 +720,8 @@ def active_records():
     auth = get_auth()
     if not auth:
         return jsonify({"error": "Unauthorized"}), 401
-    
-    conn = get_conn(); cur = conn.cursor()
-    try:
-        where_clause = ""
-        params = ()
-        
-        # For regular users, filter by their user_id
-        if auth["role"] == "user":
-            where_clause = "WHERE bb.user_id=%s"
-            params = (auth["id"],)
-        elif auth["role"] in ("admin", "staff"):
-            where_clause = ""
-        else:
-            return jsonify({"error": "Unauthorized"}), 401
-        
-        sql = f"""SELECT bb.id, bb.book_id, b.title, b.subject, b.author,
-                         bb.user_id, br.borrower_name, bb.borrowed_date, bb.due_date,
-                         bb.status, bb.request_id
-                  FROM borrowed_books bb
-                  JOIN books b ON b.id = bb.book_id
-                  JOIN borrow_records br ON br.id = bb.request_id
-                  {where_clause}
-                  ORDER BY bb.borrowed_date DESC, bb.id DESC"""
-        
-        cur.execute(sql, params)
-        data = rows(cur)
-        
-        # Format dates
-        for d in data:
-            if d.get("borrowed_date"):
-                d["borrow_date"] = str(d["borrowed_date"])
-                del d["borrowed_date"]
-            if d.get("due_date") is not None:
-                d["due_date"] = str(d["due_date"])
-        
-        return jsonify(data)
-    finally:
-        cur.close(); conn.close()
+
+    return jsonify(_records(auth, "WHERE r.status='borrowed'"))
 
 
 @app.route("/api/records/history", methods=["GET"])
@@ -773,36 +737,8 @@ def overdue_records():
     auth = get_auth()
     if not auth or auth["role"] not in ("admin", "staff"):
         return jsonify({"error": "Forbidden"}), 403
-    
-    conn = get_conn(); cur = conn.cursor()
-    try:
-        today = date.today()
-        sql = f"""SELECT bb.id, bb.book_id, b.title, b.subject, b.author,
-                         bb.user_id, br.borrower_name, bb.borrowed_date, bb.due_date,
-                         bb.status, bb.request_id
-                  FROM borrowed_books bb
-                  JOIN books b ON b.id = bb.book_id
-                  JOIN borrow_records br ON br.id = bb.request_id
-                  WHERE (bb.status='overdue' OR (bb.status='borrowed' AND bb.due_date < %s))
-                  ORDER BY bb.due_date ASC, bb.id DESC"""
-        
-        cur.execute(sql, (today,))
-        data = rows(cur)
-        
-        # Format dates and mark overdue
-        for d in data:
-            if d.get("borrowed_date"):
-                d["borrow_date"] = str(d["borrowed_date"])
-                del d["borrowed_date"]
-            if d.get("due_date") is not None:
-                d["due_date"] = str(d["due_date"])
-            # Mark as overdue if past due
-            if d["status"] == "borrowed" and date.fromisoformat(d["due_date"]) < today:
-                d["status"] = "overdue"
-        
-        return jsonify(data)
-    finally:
-        cur.close(); conn.close()
+
+    return jsonify(_records(auth, "WHERE r.status='overdue'"))
 
 
 @app.route("/api/borrow", methods=["POST"])
