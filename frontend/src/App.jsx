@@ -153,9 +153,30 @@ export default function App() {
       <ToastContainer toasts={toasts} removeToast={removeToast} />
       <header>
         <div className="header-top">
-          <div>
+          <div className="header-title">
             <h1>📚 Library Management System</h1>
           </div>
+
+          <nav className="nav-menu">
+            <div className="nav-tabs-container">
+              {user ? (
+                (user.role === "admin" ? ADMIN_TABS : user.role === "staff" ? STAFF_TABS : USER_TABS).map((item) => (
+                  <button
+                    key={item.key}
+                    className={tab === item.key ? "active" : ""}
+                    onClick={() => setTab(item.key)}
+                  >
+                    {item.label}
+                  </button>
+                ))
+              ) : (
+                <>
+                  <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Login</button>
+                  <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Register</button>
+                </>
+              )}
+            </div>
+          </nav>
 
           {user ? (
             <div className="user-panel">
@@ -176,29 +197,9 @@ export default function App() {
                 <NotificationBell />
               </div>
               <button onClick={() => setDarkMode((d) => !d)}>{darkMode ? "🌙" : "☀️"}</button>
-              <button className="danger" onClick={doLogout}>Logout</button>
             </div>
           ) : null}
         </div>
-
-        <nav>
-          {user ? (
-            (user.role === "admin" ? ADMIN_TABS : user.role === "staff" ? STAFF_TABS : USER_TABS).map((item) => (
-              <button
-                key={item.key}
-                className={tab === item.key ? "active" : ""}
-                onClick={() => setTab(item.key)}
-              >
-                {item.label}
-              </button>
-            ))
-          ) : (
-            <>
-              <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Login</button>
-              <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Register</button>
-            </>
-          )}
-        </nav>
       </header>
 
       <main className="main-content">
@@ -212,6 +213,7 @@ export default function App() {
           onClose={() => setShowProfilePopup(false)}
           showToast={showToast}
           onProfileUpdate={handleProfileUpdate}
+          onLogout={doLogout}
         />
       )}
     </>

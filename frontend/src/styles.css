@@ -16,7 +16,27 @@ header {
   }
 }
 header h1 { margin: 0; font-size: 1.5rem; }
-nav { display: flex; gap: 1rem; margin-top: .5rem; flex-wrap: wrap; }
+
+.header-title {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.nav-menu {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin: 0 1.5rem;
+}
+
+.nav-tabs-container {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
 nav button {
   background: var(--nav-btn-bg);
   color: var(--nav-btn-text);
@@ -149,8 +169,8 @@ main { width: 100%; margin: 0; padding: 1.5rem 1.5rem 2rem; min-height: calc(100
 .pagination { display: flex; gap: .75rem; align-items: center; justify-content: flex-end; margin-top: 1rem; }
 .icon-btn { border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.14); color: white; border-radius: 10px; padding: .5rem .8rem; cursor: pointer; }
 .icon-btn:hover { background: rgba(255,255,255,.25); }
-.header-top { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; flex-wrap: wrap; }
-.user-panel { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.header-top { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; flex-wrap: nowrap; }
+.user-panel { display: flex; align-items: center; gap: 1rem; flex-wrap: nowrap; flex: 0 0 auto; }
 .user-panel .user-avatar { width: 44px; height: 44px; }
 .user-panel .user-info { min-width: 180px; }
 .header-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
@@ -367,11 +387,14 @@ label {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+  flex-wrap: nowrap;
 }
 .user-panel {
   display: flex;
   align-items: center;
   gap: .75rem;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
 }
 .user-panel button {
   background: rgba(255,255,255,.2);
@@ -3064,10 +3087,46 @@ body.dark .auth-card .success {
 }
 
 .profile-popup-footer .btn-primary,
-.profile-popup-footer .btn-secondary {
+.profile-popup-footer .btn-secondary,
+.profile-popup-footer .btn-danger {
   flex: 1;
   padding: 0.6rem;
   font-size: 0.9rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.profile-popup-footer .btn-primary {
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.profile-popup-footer .btn-primary:hover {
+  background: var(--primary);
+  filter: brightness(1.1);
+}
+
+.profile-popup-footer .btn-danger {
+  background: var(--danger);
+  color: var(--primary-text);
+}
+
+.profile-popup-footer .btn-danger:hover {
+  background: var(--danger);
+  filter: brightness(1.1);
+}
+
+.profile-popup-footer .btn-secondary {
+  background: rgba(255,255,255,.15);
+  color: var(--card-text, white);
+  border: 1px solid rgba(255,255,255,.25);
+}
+
+.profile-popup-footer .btn-secondary:hover {
+  background: rgba(255,255,255,.25);
 }
 
 /* Edit Profile Modal */

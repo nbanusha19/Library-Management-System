@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import ProfileModal from "./ProfileModal";
 
-export default function ProfilePopup({ user, onClose, showToast, onProfileUpdate }) {
+export default function ProfilePopup({ user, onClose, showToast, onProfileUpdate, onLogout }) {
   const [showEditForm, setShowEditForm] = useState(false);
 
   const getInitial = () => {
@@ -14,6 +14,11 @@ export default function ProfilePopup({ user, onClose, showToast, onProfileUpdate
       return user.profile_photo;
     }
     return null;
+  };
+
+  const handleLogoutClick = () => {
+    onClose();
+    onLogout();
   };
 
   return (
@@ -70,6 +75,12 @@ export default function ProfilePopup({ user, onClose, showToast, onProfileUpdate
             onClick={() => setShowEditForm(true)}
           >
             ✏️ Edit Profile
+          </button>
+          <button 
+            className="btn-danger"
+            onClick={handleLogoutClick}
+          >
+            Logout
           </button>
           <button 
             className="btn-secondary"
