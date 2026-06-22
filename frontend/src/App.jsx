@@ -98,12 +98,17 @@ export default function App() {
     setMessage(msg);
   };
 
+  const handleSwitchMode = (newMode) => {
+    setMode(newMode);
+    setMessage("");
+  };
+
   const renderPage = () => {
     if (!user) {
       return mode === "login" ? (
-        <LoginPage onLogin={handleLogin} message={message} showToast={showToast} />
+        <LoginPage onLogin={handleLogin} onSwitchMode={handleSwitchMode} message={message} showToast={showToast} />
       ) : (
-        <RegisterPage onRegister={handleRegisterSuccess} message={message} showToast={showToast} />
+        <RegisterPage onRegister={handleRegisterSuccess} onSwitchMode={handleSwitchMode} message={message} showToast={showToast} />
       );
     }
 

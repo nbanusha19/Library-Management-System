@@ -407,9 +407,17 @@ def register():
         )
         user_id = cur.lastrowid
         cur.execute(
-            "INSERT INTO user_status_history (user_id, status, comment) VALUES (%s, 'pending', 'Registered - awaiting admin approval')",
-            (user_id,),
-        )
+    "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id, is_read) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+    (
+        user_id,
+        "user",
+        f"User Status: pending",
+        "Status changed to pending - Registered - awaiting admin approval",
+        "USER_REGISTRATION",
+        user_id,
+        0
+    )
+)
         
         # Create notification for all admin users
         notification_message = f"New user {username} is waiting for approval"
@@ -631,9 +639,18 @@ def review_user(user_id):
             return jsonify({"error": "User not found"}), 404
 
         cur.execute("UPDATE users SET status=%s WHERE id=%s", (target_status, user_id))
+        history_comment = comment or f"{action.capitalize()}ed by admin"
         cur.execute(
-            "INSERT INTO user_status_history (user_id, status, comment) VALUES (%s, %s, %s)",
-            (user_id, target_status, comment or f"{action.capitalize()}ed by admin"),
+            "INSERT INTO notifications (user_id, recipient_role, title, message, type, related_id, is_read) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (
+                user_id,
+                "user",
+                f"User Status: {target_status}",
+                f"Status changed to {target_status} - {history_comment}",
+                "USER_REGISTRATION",
+                user_id,
+                0
+            )
         )
         # Notify the user about their review status
         if action == "approve":
@@ -669,9 +686,12 @@ def my_status_history():
 
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
-        "SELECT status, comment, updated_at FROM user_status_history WHERE user_id=%s ORDER BY updated_at DESC",
-        (auth["id"],),
-    )
+    "SELECT title AS status, message AS comment, updated_at "
+    "FROM notifications "
+    "WHERE user_id=%s AND related_id=%s AND type='USER_REGISTRATION' "
+    "ORDER BY updated_at DESC",
+    (auth["id"], auth["id"]),
+)
     data = rows(cur)
     cur.close(); conn.close()
     return jsonify(data)

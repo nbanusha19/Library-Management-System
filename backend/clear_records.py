@@ -20,7 +20,6 @@ for query in [
     "SELECT role, COUNT(*) FROM users GROUP BY role",
     'SELECT COUNT(*) FROM borrow_records',
     'SELECT COUNT(*) FROM notifications',
-    'SELECT COUNT(*) FROM user_status_history'
 ]:
     cur.execute(query)
     print(query)
@@ -30,7 +29,6 @@ for query in [
 print('\nAbout to delete all user registration and login records.\n')
 # preserve staff/admin?
 # Delete all non-admin/staff users and related records
-cur.execute("DELETE ur FROM user_status_history ur JOIN users u ON ur.user_id = u.id WHERE u.role = 'user'")
 cur.execute("DELETE n FROM notifications n JOIN users u ON n.user_id = u.id WHERE u.role = 'user'")
 cur.execute("DELETE b FROM borrow_records b JOIN users u ON b.user_id = u.id WHERE u.role = 'user'")
 cur.execute("DELETE FROM users WHERE role = 'user'")
