@@ -93,11 +93,19 @@ export default function NotificationBell() {
   return (
     <div className="notification-bell-container" ref={dropdownRef}>
       <button
-        className={`notification-bell-button ${unreadCount > 0 ? "has-unread" : ""}`}
+        type="button"
+        className={`icon-action-button notification-bell-button ${unreadCount > 0 ? "has-unread" : ""}`}
         onClick={() => setIsOpen(!isOpen)}
-        title={`${unreadCount} unread notification${unreadCount !== 1 ? "s" : ""}`}
+        title="Notifications"
+        aria-label="Notifications"
+        aria-expanded={isOpen}
       >
-        <span className="bell-icon">🔔</span>
+        <span className="bell-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 17H5a2 2 0 0 1-2-2c0-1.4.9-2.5 2.2-2.9L6 11.3V9a6 6 0 1 1 12 0v2.3l.8 1.8c1.2.4 2.2 1.5 2.2 2.9a2 2 0 0 1-2 2h-2" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+        </span>
         {unreadCount > 0 && <span className="badge">{unreadCount}</span>}
       </button>
 

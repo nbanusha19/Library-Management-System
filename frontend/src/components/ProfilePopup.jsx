@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import ProfileModal from "./ProfileModal";
 
 export default function ProfilePopup({ user, onClose, showToast, onProfileUpdate, onLogout }) {
   const [showEditForm, setShowEditForm] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
+  const closeTimerRef = useRef(null);
 
   const getInitial = () => {
     return user?.username ? user.username.charAt(0).toUpperCase() : "👤";
@@ -16,15 +18,28 @@ export default function ProfilePopup({ user, onClose, showToast, onProfileUpdate
     return null;
   };
 
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const requestClose = () => {
+    setIsVisible(false);
+    closeTimerRef.current = window.setTimeout(() => onClose(), 220);
+  };
+
   const handleLogoutClick = () => {
-    onClose();
+    requestClose();
     onLogout();
   };
 
   return (
     <>
-      <div className="profile-popup-overlay" onClick={onClose} />
-      <div className="profile-popup">
+      <div className={`profile-popup-overlay ${isVisible ? "visible" : "closing"}`} onClick={requestClose} />
+      <div className={`profile-popup ${isVisible ? "visible" : "closing"}`}>
         {/* Header with Avatar */}
         <div className="profile-popup-header">
           {getAvatarUrl() ? (
@@ -32,7 +47,7 @@ export default function ProfilePopup({ user, onClose, showToast, onProfileUpdate
           ) : (
             <div className="profile-avatar-initial">{getInitial()}</div>
           )}
-          <button className="popup-close" onClick={onClose}>✕</button>
+          <button className="popup-close" onClick={requestClose} aria-label="Close profile menu">✕</button>
         </div>
 
         {/* Profile Info */}
@@ -74,7 +89,7 @@ export default function ProfilePopup({ user, onClose, showToast, onProfileUpdate
             className="btn-primary"
             onClick={() => setShowEditForm(true)}
           >
-            ✏️ Edit Profile
+            ⚙️ Settings
           </button>
           <button 
             className="btn-danger"
@@ -84,7 +99,7 @@ export default function ProfilePopup({ user, onClose, showToast, onProfileUpdate
           </button>
           <button 
             className="btn-secondary"
-            onClick={onClose}
+            onClick={requestClose}
           >
             Close
           </button>

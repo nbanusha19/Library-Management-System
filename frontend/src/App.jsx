@@ -180,23 +180,53 @@ export default function App() {
 
           {user ? (
             <div className="user-panel">
-              <button 
+              <div className="header-action-group">
+                <div className="notifications">
+                  <NotificationBell />
+                </div>
+                <button
+                  type="button"
+                  className={`icon-action-button theme-toggle ${darkMode ? "active-theme" : ""}`}
+                  onClick={() => setDarkMode((d) => !d)}
+                  title="Toggle Theme"
+                  aria-label="Toggle Theme"
+                  aria-pressed={darkMode}
+                >
+                  {darkMode ? (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="4.8" />
+                      <path d="M12 2.5v2.2" />
+                      <path d="M12 19.3v2.2" />
+                      <path d="M4.9 4.9l1.6 1.6" />
+                      <path d="M17.5 17.5l1.6 1.6" />
+                      <path d="M2.5 12h2.2" />
+                      <path d="M19.3 12h2.2" />
+                      <path d="M4.9 19.1l1.6-1.6" />
+                      <path d="M17.5 6.5l1.6-1.6" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 15.5A8.5 8.5 0 0 1 8.5 4a8.5 8.5 0 1 0 11.5 11.5Z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+
+              <button
+                type="button"
                 className="user-avatar-btn"
                 onClick={() => setShowProfilePopup(true)}
-                title="Click to view profile"
+                title="Open profile menu"
+                aria-label="Open profile menu"
+                aria-expanded={showProfilePopup}
               >
-                <div className="user-avatar">
-                  {user.profile_photo ? <img src={user.profile_photo} alt={user.username} /> : <span>👤</span>}
-                </div>
-                <div className="user-info">
-                  <strong>{user.username}</strong>
-                  <small>{user.email}</small>
-                </div>
+                <span className="user-avatar-shell">
+                  <span className="user-avatar-status" />
+                  <span className="user-avatar">
+                    {user.profile_photo ? <img src={user.profile_photo} alt="" /> : <span>👤</span>}
+                  </span>
+                </span>
               </button>
-              <div className="notifications">
-                <NotificationBell />
-              </div>
-              <button onClick={() => setDarkMode((d) => !d)}>{darkMode ? "🌙" : "☀️"}</button>
             </div>
           ) : null}
         </div>

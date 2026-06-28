@@ -6,85 +6,122 @@
 }
 
 .notification-bell-button {
-  background: none;
-  border: none;
-  padding: 8px 12px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.22), rgba(255,255,255,0.12));
+  border: 1px solid rgba(255,255,255,0.18);
+  padding: 0.6rem;
   font-size: 20px;
   cursor: pointer;
   position: relative;
   border-radius: 50%;
-  transition: all 0.3s ease;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  color: var(--header-text);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
 }
 
-.notification-bell-button:hover {
-  background-color: rgba(59, 130, 246, 0.1);
+.notification-bell-button:hover,
+.notification-bell-button:focus-visible {
+  transform: translateY(-1px) scale(1.05);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16);
 }
 
 .notification-bell-button.has-unread {
-  animation: bell-ring 0.5s ease-in-out;
+  animation: bell-ring 0.6s ease-in-out;
 }
 
 @keyframes bell-ring {
   0%, 100% {
-    transform: rotate(0);
+    transform: rotate(0) scale(1);
   }
   25% {
-    transform: rotate(-15deg);
+    transform: rotate(-12deg) scale(1.04);
   }
   75% {
-    transform: rotate(15deg);
+    transform: rotate(12deg) scale(1.04);
   }
 }
 
 .bell-icon {
-  display: block;
-  width: 24px;
-  height: 24px;
-  line-height: 24px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.bell-icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
 .notification-bell-button .badge {
   position: absolute;
-  top: -5px;
-  right: -5px;
-  background-color: #ef4444;
+  top: -3px;
+  right: -3px;
+  background: linear-gradient(135deg, #f43f5e, #ef4444);
   color: white;
   border-radius: 50%;
-  width: 20px;
-  height: 20px;
+  width: 1.1rem;
+  height: 1.1rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
-  border: 2px solid white;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  font-size: 0.68rem;
+  font-weight: 700;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.28);
+  animation: badgePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.24);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
 }
 
 /* Dropdown */
 .notification-dropdown {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 0.7rem);
   right: 0;
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.15);
+  backdrop-filter: blur(16px);
   z-index: 1000;
   width: 360px;
   max-height: 500px;
   display: flex;
   flex-direction: column;
-  margin-top: 8px;
+  overflow: hidden;
+  animation: dropdownFadeIn 0.22s ease;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .notification-header {
   padding: 12px 16px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -93,7 +130,7 @@
 .notification-header h3 {
   margin: 0;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
   color: #1f2937;
 }
 
@@ -104,7 +141,7 @@
   font-size: 12px;
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 999px;
   transition: background-color 0.2s;
 }
 
@@ -120,7 +157,7 @@
 
 .notification-item {
   padding: 12px 16px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
   cursor: pointer;
   transition: background-color 0.2s;
   position: relative;
@@ -130,11 +167,11 @@
 }
 
 .notification-item:hover {
-  background-color: #f9fafb;
+  background-color: rgba(248, 250, 252, 0.95);
 }
 
 .notification-item.unread {
-  background-color: #eff6ff;
+  background-color: rgba(239, 246, 255, 0.9);
 }
 
 .notification-item.empty,
@@ -183,7 +220,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background-color: #3b82f6;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
   flex-shrink: 0;
   margin-top: 6px;
 }
@@ -205,54 +242,53 @@
 }
 
 /* Dark Mode Support */
-@media (prefers-color-scheme: dark) {
-  .notification-dropdown {
-    background-color: #1f2937;
-    border-color: #374151;
-  }
+body.dark .notification-dropdown {
+  background-color: rgba(15, 23, 42, 0.96);
+  border-color: rgba(148, 163, 184, 0.16);
+  box-shadow: 0 20px 50px rgba(2, 6, 23, 0.35);
+}
 
-  .notification-header {
-    border-bottom-color: #374151;
-  }
+body.dark .notification-header {
+  border-bottom-color: rgba(148, 163, 184, 0.16);
+}
 
-  .notification-header h3 {
-    color: #f3f4f6;
-  }
+body.dark .notification-header h3 {
+  color: #f3f4f6;
+}
 
-  .notification-item {
-    border-bottom-color: #374151;
-  }
+body.dark .notification-item {
+  border-bottom-color: rgba(51, 65, 85, 0.9);
+}
 
-  .notification-item:hover {
-    background-color: #111827;
-  }
+body.dark .notification-item:hover {
+  background-color: rgba(30, 41, 59, 0.95);
+}
 
-  .notification-item.unread {
-    background-color: #1e3a5f;
-  }
+body.dark .notification-item.unread {
+  background-color: rgba(30, 64, 175, 0.25);
+}
 
-  .notification-title {
-    color: #f3f4f6;
-  }
+body.dark .notification-title {
+  color: #f3f4f6;
+}
 
-  .notification-message {
-    color: #d1d5db;
-  }
+body.dark .notification-message {
+  color: #d1d5db;
+}
 
-  .notification-type {
-    color: #6b7280;
-  }
+body.dark .notification-type {
+  color: #6b7280;
+}
 
-  .spinner-small {
-    border-color: #374151;
-    border-top-color: #3b82f6;
-  }
+body.dark .spinner-small {
+  border-color: rgba(148, 163, 184, 0.18);
+  border-top-color: #3b82f6;
 }
 
 /* Responsive */
 @media (max-width: 480px) {
   .notification-dropdown {
-    width: 320px;
-    right: -50px;
+    width: min(320px, calc(100vw - 1.5rem));
+    right: -0.35rem;
   }
 }
